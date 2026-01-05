@@ -1,0 +1,8 @@
+{
+  "name": "WS Nexus AI - Inteligência Comercial",
+  "description": "Ecossistema de Inteligência Comercial da WS Brasil I.C. Integrando Marketing, Vendas, Documentação e ERP com IA Proativa Gemini.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
