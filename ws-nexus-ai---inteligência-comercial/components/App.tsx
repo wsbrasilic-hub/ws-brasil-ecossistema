@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { ModuleType, ProductItem, Organization, UserProfile, SubscriptionLevel, FinancialTransaction, TransactionStatus, AuditLog, UserRole, Lead } from './types';
+import React, { useState, useEffect } from 'react';
+import { ModuleType, ProductItem, Organization, UserProfile, SubscriptionLevel, FinancialTransaction, TransactionStatus, Lead } from './types';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import MarketingAI from './components/MarketingAI';
@@ -92,20 +92,28 @@ const App: React.FC = () => {
     bootstrapNexus();
   }, []);
 
-  // --- BUSCA USUÁRIOS QUANDO A ORG MUDA ---
+  // --- CARREGAMENTO DE DADOS ESPECÍFICOS DA ORG ---
   useEffect(() => {
-    const fetchUsers = async () => {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('organizationId', org.id);
-      
-      if (!error && data) {
-        const mappedUsers = data.map(u => ({ ...u, name: u.fullName || u.name }));
-        setUsers(mappedUsers.length > 0 ? mappedUsers : [MASTER_OWNER]);
-      }
+    const fetchOrgData = async () => {
+      if (!isAuthenticated) return;
+      setIsCloudSyncing(true);
+
+      // 1. Busca Usuários
+      const { data: userData } = await supabase.from('users').select('*').eq('organizationId', org.id);
+      if (userData) setUsers(userData.map(u => ({ ...u, name: u.fullName || u.name })));
+
+      // 2. Busca Financeiro
+      const { data: finData } = await supabase.from('financial_transactions').select('*').eq('organization_id', org.id);
+      if (finData) setFinance(finData as FinancialTransaction[]);
+
+      // 3. Busca Leads (CRM)
+      const { data: leadData } = await supabase.from('leads').select('*').eq('organizationId', org.id);
+      if (leadData) setLeads(leadData as Lead[]);
+
+      setIsCloudSyncing(false);
     };
-    if (isAuthenticated) fetchUsers();
+
+    fetchOrgData();
   }, [org.id, isAuthenticated]);
 
   const PLAN_RULES = {
@@ -129,7 +137,6 @@ const App: React.FC = () => {
     setIsAuthLoading(true);
     const normalizedEmail = email.toLowerCase().trim();
 
-    // Login Master Root
     if (normalizedEmail === 'diretoria@wsbrasil.com.br' && pass === 'wsbrasil123') {
       setCurrentUser(MASTER_OWNER);
       setOrg(organizations[0]);
@@ -138,14 +145,9 @@ const App: React.FC = () => {
       return;
     }
 
-    // Busca usuário no banco para login
-    const { data: dbUser, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('email', normalizedEmail)
-      .single();
+    const { data: dbUser, error } = await supabase.from('users').select('*').eq('email', normalizedEmail).single();
 
-    if (!error && dbUser && pass === 'admin2026') { // Senha padrão temporária
+    if (!error && dbUser && pass === 'admin2026') { 
       const userOrg = organizations.find(o => o.id === dbUser.organizationId);
       if (userOrg?.status === 'ACTIVE') {
         setCurrentUser({ ...dbUser, name: dbUser.fullName || dbUser.name });
@@ -160,72 +162,29 @@ const App: React.FC = () => {
     setIsAuthLoading(false);
   };
 
-  // --- AÇÕES SINCRONIZADAS (USERS) ---
+  // --- AÇÕES SINCRONIZADAS ---
+
   const handleAddUser = async (userData: Partial<UserProfile>) => {
-    const newUser = {
-      ...userData,
-      id: `USR-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
-      organizationId: org.id,
-      isActive: true,
-    };
-
-    setIsCloudSyncing(true);
+    const newUser = { ...userData, id: `USR-${Date.now()}`, organizationId: org.id, isActive: true };
     const result = await syncEntity('users', [newUser]);
-    setIsCloudSyncing(false);
-
-    if (result.success) {
-      setUsers(prev => [...prev, newUser as UserProfile]);
-      alert("Usuário Nexus sincronizado com a Nuvem!");
-    } else {
-      alert(`Erro: ${result.message}`);
-    }
+    if (result.success) setUsers(prev => [...prev, newUser as UserProfile]);
   };
 
-  const handleRemoveUser = async (id: string) => {
-    if (id === 'owner-ws-root') return;
-    if (confirm("Deseja revogar este acesso permanentemente?")) {
-      setIsCloudSyncing(true);
-      const { error } = await supabase.from('users').delete().eq('id', id);
-      setIsCloudSyncing(false);
-      
-      if (!error) {
-        setUsers(prev => prev.filter(u => u.id !== id));
-      } else {
-        alert("Erro ao remover: " + error.message);
-      }
-    }
+  const handleAddTransaction = async (data: Partial<FinancialTransaction>) => {
+    const newTx = { ...data, id: `TX-${Date.now()}`, organization_id: org.id };
+    const result = await syncEntity('financial_transactions', [newTx]);
+    if (result.success) setFinance(prev => [...prev, newTx as FinancialTransaction]);
   };
 
-  // --- AÇÕES MASTER ADMIN (ORGS) ---
-  const handleAddOrg = async (newOrgData: Partial<Organization>) => {
-    const newOrg: Organization = {
-      id: `WS-${Math.random().toString(36).substr(2, 4).toUpperCase()}-${Math.floor(Math.random() * 1000)}`,
-      ...newOrgData,
-      status: 'ACTIVE',
-      createdAt: new Date().toISOString(),
-      metrics: { usersCount: 1, leadsCount: 0, revenueValue: 0 },
-      branding: { primaryColor: '#C5A059', secondaryColor: '#020617', logoUrl: null },
-      pipelineStages: INITIAL_ORGS[0].pipelineStages,
-    } as Organization;
-
-    const result = await syncEntity('organizations', [newOrg]);
-    if (result.success) setOrganizations(prev => [...prev, newOrg]);
+  const handleUpdateTransactionStatus = async (id: string, status: TransactionStatus) => {
+    const { error } = await supabase.from('financial_transactions').update({ status }).eq('id', id);
+    if (!error) setFinance(prev => prev.map(t => t.id === id ? { ...t, status } : t));
   };
 
-  const handleUpdateStatus = async (id: string, status: 'ACTIVE' | 'SUSPENDED') => {
-    const target = organizations.find(o => o.id === id);
-    if (target) {
-      const result = await syncEntity('organizations', [{ ...target, status }]);
-      if (result.success) setOrganizations(prev => prev.map(o => o.id === id ? { ...o, status } : o));
-    }
-  };
-
-  const handleUpdateSub = async (id: string, level: SubscriptionLevel) => {
-    const target = organizations.find(o => o.id === id);
-    if (target) {
-      const result = await syncEntity('organizations', [{ ...target, subscription: level }]);
-      if (result.success) setOrganizations(prev => prev.map(o => o.id === id ? { ...o, subscription: level } : o));
-    }
+  const handleAddLead = async (leadData: Partial<Lead>) => {
+    const newLead = { ...leadData, id: `LEAD-${Date.now()}`, organizationId: org.id, status: 'QUALIFICADO' };
+    const result = await syncEntity('leads', [newLead]);
+    if (result.success) setLeads(prev => [...prev, newLead as Lead]);
   };
 
   const handleLogout = () => {
@@ -289,9 +248,9 @@ const App: React.FC = () => {
         <section className="max-w-7xl mx-auto pb-24">
           {activeModule === ModuleType.DASHBOARD && <Dashboard />}
           {activeModule === ModuleType.MARKETING && <MarketingAI />}
-          {activeModule === ModuleType.SALES && <SalesCRM leads={leads} setLeads={setLeads} />}
+          {activeModule === ModuleType.SALES && <SalesCRM leads={leads} onAddLead={handleAddLead} />}
           {activeModule === ModuleType.RH && <RHManager />}
-          {activeModule === ModuleType.FINANCE && <FinancialManager transactions={finance} onAddTransaction={() => {}} onUpdateStatus={() => {}} />}
+          {activeModule === ModuleType.FINANCE && <FinancialManager transactions={finance} onAddTransaction={handleAddTransaction} onUpdateStatus={handleUpdateTransactionStatus} />}
           {activeModule === ModuleType.SCHEDULING && <SchedulingManager />}
           {activeModule === ModuleType.DOCUMENTS && <NexusDocs />}
           {activeModule === ModuleType.INVENTORY && <InventoryManager items={items} setItems={setItems} />}
@@ -303,7 +262,10 @@ const App: React.FC = () => {
               onUpdateOrg={setOrg} 
               users={users} 
               onAddUser={handleAddUser}
-              onRemoveUser={handleRemoveUser}
+              onRemoveUser={async (id) => {
+                const { error } = await supabase.from('users').delete().eq('id', id);
+                if (!error) setUsers(prev => prev.filter(u => u.id !== id));
+              }}
               auditLogs={[]} 
               userLimit={org.maxUsers} 
             />
@@ -312,9 +274,19 @@ const App: React.FC = () => {
           {activeModule === ModuleType.MASTER_ADMIN && currentUser?.role === 'SUPER_ADMIN' && (
             <MasterAdmin 
               organizations={organizations} 
-              onUpdateOrgStatus={handleUpdateStatus} 
-              onUpdateOrgSubscription={handleUpdateSub} 
-              onAddOrg={handleAddOrg} 
+              onUpdateOrgStatus={async (id, status) => {
+                await supabase.from('organizations').update({ status }).eq('id', id);
+                setOrganizations(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+              }} 
+              onUpdateOrgSubscription={async (id, subscription) => {
+                await supabase.from('organizations').update({ subscription }).eq('id', id);
+                setOrganizations(prev => prev.map(o => o.id === id ? { ...o, subscription } : o));
+              }} 
+              onAddOrg={async (newOrgData) => {
+                const newOrg = { ...newOrgData, id: `WS-${Date.now()}`, status: 'ACTIVE', branding: INITIAL_ORGS[0].branding };
+                await syncEntity('organizations', [newOrg]);
+                setOrganizations(prev => [...prev, newOrg as Organization]);
+              }} 
             />
           )}
         </section>
