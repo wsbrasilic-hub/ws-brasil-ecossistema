@@ -1,302 +1,134 @@
-import React, { useState, useEffect } from 'react';
-import { ModuleType, ProductItem, Organization, UserProfile, SubscriptionLevel, FinancialTransaction, TransactionStatus, Lead } from './types';
-import Sidebar from './components/Sidebar';
-import Dashboard from './components/Dashboard';
-import MarketingAI from './components/MarketingAI';
-import SalesCRM from './components/SalesCRM';
-import NexusDocs from './components/NexusDocs';
-import InventoryManager from './components/InventoryManager';
-import RHManager from './components/RHManager';
-import SchedulingManager from './components/SchedulingManager';
-import SettingsManager from './components/SettingsManager';
-import FinancialManager from './components/FinancialManager';
-import MasterAdmin from './components/MasterAdmin';
-import PricingPage from './components/PricingPage';
-import AuthManager from './components/AuthManager';
-import PasswordReset from './components/PasswordReset';
-import NexusChat from './components/NexusChat';
-import UpgradeModal from './components/UpgradeModal';
-import NexusVoice from './components/NexusVoice';
+import React from 'react';
+import { FinancialTransaction, Lead } from '../types';
 
-// Importação do Ecossistema WS Brasil Nexus (Supabase)
-import { supabase, syncEntity } from './services/supabase';
+interface DashboardProps {
+  transactions: FinancialTransaction[];
+  leads: Lead[];
+}
 
-const INITIAL_ORGS: Organization[] = [
-  {
-    id: 'ORG-WS-001',
-    name: 'WS Brasil Inteligência Comercial',
-    cnpj: '12.345.678/0001-90',
-    subscription: 'GOLD', 
-    maxUsers: 100,
-    status: 'ACTIVE',
-    createdAt: '2024-01-01',
-    lgpdCompliance: { dataRetentionDays: 180, anonymizeOnDelete: true, dpoContact: 'dpo@wsbrasil.com' },
-    metrics: { usersCount: 2, leadsCount: 450, revenueValue: 125000 },
-    branding: { primaryColor: '#C5A059', secondaryColor: '#020617', logoUrl: null },
-    customFieldDefinitions: [],
-    pipelineStages: [
-      { id: 'QUALIFICADO', title: 'OPORTUNIDADES AGENDADAS', color: 'border-cyan-500' },
-      { id: 'REUNIAO', title: 'REUNIÃO ESTRATÉGICA', color: 'border-blue-500' },
-      { id: 'PROPOSTA', title: 'PROPOSTA EM ANÁLISE', color: 'border-amber-500' },
-      { id: 'FECHAMENTO', title: 'FECHAMENTO IMINENTE', color: 'border-emerald-500' },
-    ]
-  }
-];
+const Dashboard: React.FC<DashboardProps> = ({ transactions, leads }) => {
+  // Cálculos Financeiros em Tempo Real
+  const totalRevenue = transactions
+    .filter(t => t.type === 'INCOME' && t.status === 'PAID')
+    .reduce((acc, t) => acc + t.amount, 0);
 
-const MASTER_OWNER: UserProfile = { 
-  id: 'owner-ws-root', 
-  name: 'Proprietário WS Brasil', 
-  email: 'diretoria@wsbrasil.com.br', 
-  role: 'SUPER_ADMIN', 
-  organizationId: 'ORG-WS-001', 
-  isActive: true, 
-  mfaEnabled: true 
-};
+  const pendingRevenue = transactions
+    .filter(t => t.type === 'INCOME' && t.status === 'PENDING')
+    .reduce((acc, t) => acc + t.amount, 0);
 
-const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAuthLoading, setIsAuthLoading] = useState(false);
-  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'CONNECTED' | 'ERROR' | 'SYNCING'>('CONNECTED');
-  const [mustResetPassword, setMustResetPassword] = useState(false);
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [activeModule, setActiveModule] = useState<ModuleType>(ModuleType.DASHBOARD);
-  const [showUpgradeModal, setShowUpgradeModal] = useState<{ required: SubscriptionLevel, reason: string } | null>(null);
-
-  // --- ESTADOS COM SINCRONISMO NAVE/NUVEM ---
-  const [organizations, setOrganizations] = useState<Organization[]>(INITIAL_ORGS);
-  const [org, setOrg] = useState<Organization>(INITIAL_ORGS[0]);
-  const [users, setUsers] = useState<UserProfile[]>([MASTER_OWNER]);
-  const [items, setItems] = useState<ProductItem[]>([]);
-  const [finance, setFinance] = useState<FinancialTransaction[]>([]);
-  const [leads, setLeads] = useState<Lead[]>([]);
-
-  // --- CARREGAMENTO INICIAL SUPABASE ---
-  useEffect(() => {
-    const bootstrapNexus = async () => {
-      setConnectionStatus('SYNCING');
-      const { data, error } = await supabase.from('organizations').select('*');
-      
-      if (!error && data && data.length > 0) {
-        const mappedOrgs = data.map(o => ({
-          ...o,
-          branding: typeof o.branding === 'string' ? JSON.parse(o.branding) : o.branding || INITIAL_ORGS[0].branding,
-          pipelineStages: INITIAL_ORGS[0].pipelineStages
-        }));
-        setOrganizations(mappedOrgs);
-        setConnectionStatus('CONNECTED');
-      } else if (error) {
-        setConnectionStatus('ERROR');
-      }
-    };
-    bootstrapNexus();
-  }, []);
-
-  // --- CARREGAMENTO DE DADOS ESPECÍFICOS DA ORG ---
-  useEffect(() => {
-    const fetchOrgData = async () => {
-      if (!isAuthenticated) return;
-      setIsCloudSyncing(true);
-
-      // 1. Busca Usuários
-      const { data: userData } = await supabase.from('users').select('*').eq('organizationId', org.id);
-      if (userData) setUsers(userData.map(u => ({ ...u, name: u.fullName || u.name })));
-
-      // 2. Busca Financeiro
-      const { data: finData } = await supabase.from('financial_transactions').select('*').eq('organization_id', org.id);
-      if (finData) setFinance(finData as FinancialTransaction[]);
-
-      // 3. Busca Leads (CRM)
-      const { data: leadData } = await supabase.from('leads').select('*').eq('organizationId', org.id);
-      if (leadData) setLeads(leadData as Lead[]);
-
-      setIsCloudSyncing(false);
-    };
-
-    fetchOrgData();
-  }, [org.id, isAuthenticated]);
-
-  const PLAN_RULES = {
-    BRONZE: { modules: [ModuleType.DASHBOARD, ModuleType.SALES, ModuleType.SCHEDULING, ModuleType.PRICING], maxUsers: 3 },
-    SILVER: { modules: [ModuleType.DASHBOARD, ModuleType.SALES, ModuleType.SCHEDULING, ModuleType.RH, ModuleType.PRICING], maxUsers: 15 },
-    GOLD: { modules: Object.values(ModuleType), maxUsers: 100 }
-  };
-
-  const checkModuleAccess = (module: ModuleType) => {
-    if (currentUser?.role === 'SUPER_ADMIN') return true;
-    const allowedModules = PLAN_RULES[org.subscription].modules;
-    if (!allowedModules.includes(module)) {
-      const required = (module === ModuleType.RH || module === ModuleType.MARKETING) ? 'SILVER' as SubscriptionLevel : 'GOLD' as SubscriptionLevel;
-      setShowUpgradeModal({ required, reason: `O módulo ${module} exige o nível ${required} de inteligência processual.` });
-      return false;
-    }
-    return true;
-  };
-
-  const handleLogin = async (email: string, pass: string) => {
-    setIsAuthLoading(true);
-    const normalizedEmail = email.toLowerCase().trim();
-
-    if (normalizedEmail === 'diretoria@wsbrasil.com.br' && pass === 'wsbrasil123') {
-      setCurrentUser(MASTER_OWNER);
-      setOrg(organizations[0]);
-      setIsAuthenticated(true);
-      setIsAuthLoading(false);
-      return;
-    }
-
-    const { data: dbUser, error } = await supabase.from('users').select('*').eq('email', normalizedEmail).single();
-
-    if (!error && dbUser && pass === 'admin2026') { 
-      const userOrg = organizations.find(o => o.id === dbUser.organizationId);
-      if (userOrg?.status === 'ACTIVE') {
-        setCurrentUser({ ...dbUser, name: dbUser.fullName || dbUser.name });
-        setOrg(userOrg);
-        setIsAuthenticated(true);
-      } else {
-        alert("Instância suspensa ou não localizada.");
-      }
-    } else {
-      alert("Credenciais Nexus não localizadas.");
-    }
-    setIsAuthLoading(false);
-  };
-
-  // --- AÇÕES SINCRONIZADAS ---
-
-  const handleAddUser = async (userData: Partial<UserProfile>) => {
-    const newUser = { ...userData, id: `USR-${Date.now()}`, organizationId: org.id, isActive: true };
-    const result = await syncEntity('users', [newUser]);
-    if (result.success) setUsers(prev => [...prev, newUser as UserProfile]);
-  };
-
-  const handleAddTransaction = async (data: Partial<FinancialTransaction>) => {
-    const newTx = { ...data, id: `TX-${Date.now()}`, organization_id: org.id };
-    const result = await syncEntity('financial_transactions', [newTx]);
-    if (result.success) setFinance(prev => [...prev, newTx as FinancialTransaction]);
-  };
-
-  const handleUpdateTransactionStatus = async (id: string, status: TransactionStatus) => {
-    const { error } = await supabase.from('financial_transactions').update({ status }).eq('id', id);
-    if (!error) setFinance(prev => prev.map(t => t.id === id ? { ...t, status } : t));
-  };
-
-  const handleAddLead = async (leadData: Partial<Lead>) => {
-    const newLead = { ...leadData, id: `LEAD-${Date.now()}`, organizationId: org.id, status: 'QUALIFICADO' };
-    const result = await syncEntity('leads', [newLead]);
-    if (result.success) setLeads(prev => [...prev, newLead as Lead]);
-  };
-
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setCurrentUser(null);
-    setActiveModule(ModuleType.DASHBOARD);
-  };
-
-  if (!isAuthenticated) return <AuthManager onLogin={handleLogin} isLoading={isAuthLoading} />;
-  if (mustResetPassword) return <PasswordReset onComplete={() => setMustResetPassword(false)} />;
+  // Métricas de Vendas (CRM)
+  const totalLeads = leads.length;
+  const closedDeals = leads.filter(l => l.status === 'FECHAMENTO').length;
+  const conversionRate = totalLeads > 0 ? ((closedDeals / totalLeads) * 100).toFixed(1) : 0;
 
   return (
-    <div className="flex min-h-screen bg-slate-950">
-      <Sidebar 
-        activeModule={activeModule} 
-        setActiveModule={(m) => checkModuleAccess(m) && setActiveModule(m)} 
-        userRole={currentUser!.role} 
-        planType={org.subscription}
-        isCloudSyncing={isCloudSyncing}
-        connectionStatus={connectionStatus}
-      />
-      <main className="flex-1 ml-20 p-8 lg:p-12 overflow-y-auto relative bg-slate-950">
-        <header className="flex justify-between items-center mb-12">
-          <div className="flex items-center space-x-6">
-             <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-xl font-black shadow-lg border border-white/10" style={{ backgroundColor: org.branding.primaryColor }}>
-                {org.branding.logoUrl ? <img src={org.branding.logoUrl} className="w-8 h-8 object-contain" /> : org.name[0]}
-             </div>
-             <div className="flex flex-col">
-                <span className="text-white text-lg font-black uppercase tracking-tighter leading-none">{org.name}</span>
-                <div className="flex items-center gap-2 mt-2">
-                   <span className="text-slate-500 text-[9px] font-black uppercase tracking-[0.4em]">Node: {org.id}</span>
-                   {currentUser?.role === 'SUPER_ADMIN' && (
-                     <span className="text-amber-500 text-[8px] font-black uppercase bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 animate-pulse">
-                        Nexus Root Authorization
-                     </span>
-                   )}
-                </div>
-             </div>
+    <div className="space-y-10 animate-fadeIn">
+      {/* HEADER ESTRATÉGICO */}
+      <div className="flex justify-between items-end">
+        <div>
+          <h2 className="text-4xl font-black text-white uppercase tracking-tighter">WS Nexus Insight</h2>
+          <p className="text-slate-500 font-bold text-[10px] uppercase tracking-[0.5em] mt-2">Inteligência de Dados em Tempo Real</p>
+        </div>
+        <div className="flex gap-4">
+          <div className="bg-slate-900 border border-slate-800 px-6 py-3 rounded-2xl flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Conexão Supabase Ativa</span>
           </div>
-          <div className="flex items-center space-x-4">
-             <div className="flex items-center space-x-4 bg-slate-900/80 pl-5 pr-2 py-2 rounded-2xl border border-slate-800 shadow-xl relative group hover:border-amber-500/50 transition-all cursor-pointer">
-                <div className="text-right">
-                   <p className="text-xs font-black text-white leading-none">{currentUser!.name}</p>
-                   <p className={`text-[8px] font-bold uppercase tracking-[0.2em] mt-1.5 ${currentUser?.role === 'SUPER_ADMIN' ? 'text-amber-500' : 'text-blue-500'}`}>
-                     {currentUser?.role}
-                   </p>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 group-hover:text-amber-500 transition-colors">
-                   <i className={`fa-solid ${currentUser?.role === 'SUPER_ADMIN' ? 'fa-crown' : 'fa-user-gear'}`}></i>
-                </div>
-                <div className="absolute top-full right-0 mt-3 w-56 bg-slate-900 border border-slate-800 rounded-[1.5rem] shadow-2xl opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all p-2 z-[200] pointer-events-none group-hover:pointer-events-auto">
-                   <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-rose-500/10 text-rose-500 rounded-xl transition-colors">
-                      <i className="fa-solid fa-power-off text-sm"></i>
-                      <span className="text-[10px] font-black uppercase tracking-widest">Encerrar Sessão</span>
-                   </button>
-                </div>
-             </div>
-          </div>
-        </header>
+        </div>
+      </div>
 
-        <section className="max-w-7xl mx-auto pb-24">
-          {activeModule === ModuleType.DASHBOARD && <Dashboard />}
-          {activeModule === ModuleType.MARKETING && <MarketingAI />}
-          {activeModule === ModuleType.SALES && <SalesCRM leads={leads} onAddLead={handleAddLead} />}
-          {activeModule === ModuleType.RH && <RHManager />}
-          {activeModule === ModuleType.FINANCE && <FinancialManager transactions={finance} onAddTransaction={handleAddTransaction} onUpdateStatus={handleUpdateTransactionStatus} />}
-          {activeModule === ModuleType.SCHEDULING && <SchedulingManager />}
-          {activeModule === ModuleType.DOCUMENTS && <NexusDocs />}
-          {activeModule === ModuleType.INVENTORY && <InventoryManager items={items} setItems={setItems} />}
-          {activeModule === ModuleType.PRICING && <PricingPage />}
+      {/* CARDS PRINCIPAIS (KPIs) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] relative overflow-hidden group hover:border-amber-500/50 transition-all">
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Faturamento Realizado</p>
+          <p className="text-3xl font-black text-white mt-3">R$ {totalRevenue.toLocaleString()}</p>
+          <div className="mt-4 flex items-center gap-2">
+            <span className="text-emerald-500 text-[10px] font-black">+12% vs mês ant.</span>
+          </div>
+          <i className="fa-solid fa-money-bill-trend-up absolute -right-4 -bottom-4 text-7xl text-slate-800/20"></i>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] relative overflow-hidden group hover:border-amber-500/50 transition-all">
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Volume de Leads</p>
+          <p className="text-3xl font-black text-white mt-3">{totalLeads}</p>
+          <div className="mt-4 flex items-center gap-2">
+            <span className="text-amber-500 text-[10px] font-black">{leads.filter(l => l.status === 'QUALIFICADO').length} Novos hoje</span>
+          </div>
+          <i className="fa-solid fa-users-rays absolute -right-4 -bottom-4 text-7xl text-slate-800/20"></i>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] relative overflow-hidden group hover:border-amber-500/50 transition-all">
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Taxa de Conversão</p>
+          <p className="text-3xl font-black text-white mt-3">{conversionRate}%</p>
+          <div className="mt-4 flex items-center gap-2">
+            <span className="text-blue-500 text-[10px] font-black">Benchmark: 5.2%</span>
+          </div>
+          <i className="fa-solid fa-bullseye absolute -right-4 -bottom-4 text-7xl text-slate-800/20"></i>
+        </div>
+
+        <div className="bg-slate-900 border border-amber-500/20 p-8 rounded-[2.5rem] relative overflow-hidden group bg-gradient-to-br from-slate-900 to-amber-950/10">
+          <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest">Previsão de Caixa</p>
+          <p className="text-3xl font-black text-white mt-3">R$ {pendingRevenue.toLocaleString()}</p>
+          <div className="mt-4 flex items-center gap-2 text-slate-500 text-[10px] font-black uppercase">Aguardando Liquidação</div>
+          <i className="fa-solid fa-hourglass-half absolute -right-4 -bottom-4 text-7xl text-amber-500/5"></i>
+        </div>
+      </div>
+
+      {/* GRÁFICOS E TABELAS ANALÍTICAS */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* FUNIL VISUAL */}
+        <div className="lg:col-span-2 bg-slate-900/50 border border-slate-800 rounded-[3rem] p-10">
+          <div className="flex justify-between items-center mb-8">
+            <h3 className="text-sm font-black text-white uppercase tracking-widest">Saúde do Pipeline</h3>
+            <button className="text-[9px] font-black text-slate-500 uppercase hover:text-white transition-colors">Ver Relatório Completo</button>
+          </div>
           
-          {activeModule === ModuleType.SETTINGS && (
-            <SettingsManager 
-              org={org} 
-              onUpdateOrg={setOrg} 
-              users={users} 
-              onAddUser={handleAddUser}
-              onRemoveUser={async (id) => {
-                const { error } = await supabase.from('users').delete().eq('id', id);
-                if (!error) setUsers(prev => prev.filter(u => u.id !== id));
-              }}
-              auditLogs={[]} 
-              userLimit={org.maxUsers} 
-            />
-          )}
+          <div className="space-y-6">
+            {(['QUALIFICADO', 'REUNIAO', 'PROPOSTA', 'FECHAMENTO'] as const).map(status => {
+              const count = leads.filter(l => l.status === status).length;
+              const percentage = totalLeads > 0 ? (count / totalLeads) * 100 : 0;
+              return (
+                <div key={status} className="space-y-2">
+                  <div className="flex justify-between text-[10px] font-black uppercase tracking-tighter">
+                    <span className="text-slate-400">{status}</span>
+                    <span className="text-white">{count} Leads</span>
+                  </div>
+                  <div className="h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                    <div 
+                      className="h-full bg-amber-600 transition-all duration-1000" 
+                      style={{ width: `${percentage}%` }}
+                    ></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
-          {activeModule === ModuleType.MASTER_ADMIN && currentUser?.role === 'SUPER_ADMIN' && (
-            <MasterAdmin 
-              organizations={organizations} 
-              onUpdateOrgStatus={async (id, status) => {
-                await supabase.from('organizations').update({ status }).eq('id', id);
-                setOrganizations(prev => prev.map(o => o.id === id ? { ...o, status } : o));
-              }} 
-              onUpdateOrgSubscription={async (id, subscription) => {
-                await supabase.from('organizations').update({ subscription }).eq('id', id);
-                setOrganizations(prev => prev.map(o => o.id === id ? { ...o, subscription } : o));
-              }} 
-              onAddOrg={async (newOrgData) => {
-                const newOrg = { ...newOrgData, id: `WS-${Date.now()}`, status: 'ACTIVE', branding: INITIAL_ORGS[0].branding };
-                await syncEntity('organizations', [newOrg]);
-                setOrganizations(prev => [...prev, newOrg as Organization]);
-              }} 
-            />
-          )}
-        </section>
-      </main>
-
-      <NexusChat />
-      <NexusVoice />
-      {showUpgradeModal && <UpgradeModal required={showUpgradeModal.required} reason={showUpgradeModal.reason} onClose={() => setShowUpgradeModal(null)} />}
+        {/* ÚLTIMAS ATIVIDADES FINANCEIRAS */}
+        <div className="bg-slate-900/50 border border-slate-800 rounded-[3rem] p-10">
+          <h3 className="text-sm font-black text-white uppercase tracking-widest mb-8">Fluxo Recente</h3>
+          <div className="space-y-6">
+            {transactions.slice(0, 5).map(t => (
+              <div key={t.id} className="flex justify-between items-center group">
+                <div className="flex items-center gap-4">
+                  <div className={`w-2 h-2 rounded-full ${t.type === 'INCOME' ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
+                  <div>
+                    <p className="text-[11px] font-bold text-white group-hover:text-amber-500 transition-colors">{t.description}</p>
+                    <p className="text-[8px] text-slate-600 font-black uppercase">{t.date}</p>
+                  </div>
+                </div>
+                <p className={`text-[10px] font-black ${t.type === 'INCOME' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {t.type === 'INCOME' ? '+' : '-'} R$ {t.amount}
+                </p>
+              </div>
+            ))}
+            {transactions.length === 0 && <p className="text-[10px] text-slate-600 text-center py-10 uppercase font-black">Sem movimentações</p>}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
 
-export default App;
+export default Dashboard;
