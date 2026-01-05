@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
 import { ModuleType, ProductItem, Organization, UserProfile, SubscriptionLevel, FinancialTransaction, TransactionStatus, Lead } from './types';
 import Sidebar from './components/Sidebar';
@@ -16,6 +15,8 @@ import PasswordReset from './components/PasswordReset';
 import NexusChat from './components/NexusChat';
 import UpgradeModal from './components/UpgradeModal';
 import NexusVoice from './components/NexusVoice';
+import SettingsManager from './components/SettingsManager'; // IMPORTANTE
+import MasterAdmin from './components/MasterAdmin'; // IMPORTANTE
 
 const INITIAL_ORGS: Organization[] = [
   {
@@ -61,8 +62,8 @@ const App: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [items, setItems] = useState<ProductItem[]>([]);
   const [finance, setFinance] = useState<FinancialTransaction[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([MASTER_OWNER]); // Estado para gestão de usuários
 
-  // Efeito para liberar componentes de IA apenas após o Dashboard estar estável
   useEffect(() => {
     if (isAuthenticated) {
       const timer = setTimeout(() => setIsReadyForAI(true), 500);
@@ -75,9 +76,7 @@ const App: React.FC = () => {
   const handleLogin = useCallback(async (email: string, pass: string) => {
     const normalizedEmail = email.toLowerCase().trim();
     
-    // LOGIN MASTER - PRIORIDADE ABSOLUTA
     if (normalizedEmail === 'diretoria@wsbrasil.com.br' && pass === 'wsbrasil123') {
-      console.log("Nexus Security: Master Access Verified.");
       setCurrentUser(MASTER_OWNER);
       setOrg(INITIAL_ORGS[0]);
       setIsAuthenticated(true);
@@ -85,7 +84,6 @@ const App: React.FC = () => {
     }
 
     setIsAuthLoading(true);
-    // Simulação curta para outros usuários
     await new Promise(resolve => setTimeout(resolve, 800));
 
     if (normalizedEmail === 'admin' && pass === 'admin2026') {
@@ -104,9 +102,7 @@ const App: React.FC = () => {
     setActiveModule(ModuleType.DASHBOARD);
   };
 
-  if (!isAuthenticated) {
-    return <AuthManager onLogin={handleLogin} isLoading={isAuthLoading} />;
-  }
+  if (!isAuthenticated) return <AuthManager onLogin={handleLogin} isLoading={isAuthLoading} />;
 
   return (
     <div className="flex min-h-screen bg-slate-950 font-sans selection:bg-amber-500/30">
@@ -141,13 +137,19 @@ const App: React.FC = () => {
                 <div className="text-right">
                    <p className="text-xs font-black text-white leading-none">{currentUser?.name}</p>
                    <p className="text-[8px] font-bold uppercase tracking-[0.2em] mt-1.5 text-amber-500">
-                    OWNER AUTHORITY
+                    {currentUser?.role === 'SUPER_ADMIN' ? 'OWNER AUTHORITY' : 'USER ACCESS'}
                    </p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-slate-800 border border-amber-500/30 flex items-center justify-center text-amber-600">
-                   <i className="fa-solid fa-crown"></i>
+                   <i className={`fa-solid ${currentUser?.role === 'SUPER_ADMIN' ? 'fa-crown' : 'fa-user'}`}></i>
                 </div>
                 <div className="absolute top-full right-0 mt-3 w-56 bg-slate-900 border border-slate-800 rounded-[1.5rem] shadow-2xl opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all p-2 z-[200] pointer-events-none group-hover:pointer-events-auto">
+                   {currentUser?.role === 'SUPER_ADMIN' && (
+                     <button onClick={() => setActiveModule(ModuleType.MASTER_ADMIN)} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-amber-500/10 text-amber-500 rounded-xl transition-colors mb-1">
+                        <i className="fa-solid fa-tower-broadcast text-sm"></i>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-left">Comando Global</span>
+                     </button>
+                   )}
                    <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-rose-500/10 text-rose-500 rounded-xl transition-colors">
                       <i className="fa-solid fa-power-off text-sm"></i>
                       <span className="text-[10px] font-black uppercase tracking-widest text-left">Sair do Terminal</span>
@@ -167,6 +169,24 @@ const App: React.FC = () => {
           {activeModule === ModuleType.DOCUMENTS && <NexusDocs />}
           {activeModule === ModuleType.INVENTORY && <InventoryManager items={items} setItems={setItems} />}
           {activeModule === ModuleType.PRICING && <PricingPage />}
+          
+          {/* RENDERIZAÇÃO DO MÓDULO DE CONFIGURAÇÕES */}
+          {activeModule === ModuleType.SETTINGS && (
+            <SettingsManager 
+              org={org} 
+              onUpdateOrg={setOrg} 
+              users={users} 
+              onAddUser={(u) => setUsers([...users, { ...u, id: Date.now().toString(), organizationId: org.id, isActive: true, mfaEnabled: false } as UserProfile])}
+              onRemoveUser={(id) => setUsers(users.filter(u => u.id !== id))}
+              auditLogs={[]} 
+              userLimit={org.maxUsers} 
+            />
+          )}
+
+          {/* RENDERIZAÇÃO DO MASTER ADMIN */}
+          {activeModule === ModuleType.MASTER_ADMIN && currentUser?.role === 'SUPER_ADMIN' && (
+            <MasterAdmin organizations={[org]} onUpdateOrgStatus={() => {}} onUpdateOrgSubscription={() => {}} onAddOrg={() => {}} />
+          )}
         </section>
       </main>
 
