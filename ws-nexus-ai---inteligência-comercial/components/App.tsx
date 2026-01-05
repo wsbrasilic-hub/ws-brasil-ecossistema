@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { ModuleType, ProductItem, Organization, UserProfile, SubscriptionLevel, FinancialTransaction, TransactionStatus, AuditLog, UserRole, Lead } from '../types';
 import Sidebar from './Sidebar';
@@ -93,7 +92,6 @@ const App: React.FC = () => {
   };
 
   const checkModuleAccess = (module: ModuleType) => {
-    // BYPASS TOTAL: SUPER_ADMIN não obedece regras de plano
     if (currentUser?.role === 'SUPER_ADMIN') return true;
     if (module === ModuleType.PRICING) return true;
 
@@ -119,16 +117,10 @@ const App: React.FC = () => {
 
   const handleLogin = async (email: string, pass: string) => {
     setIsAuthLoading(true);
-    console.log("Nexus Auth: Tentativa de login para", email);
-    
-    // Simulação de latência de segurança
     await new Promise(resolve => setTimeout(resolve, 800));
-    
     const normalizedEmail = email.toLowerCase().trim();
 
-    // 1. PRIORIDADE ZERO: LOGIN MASTER PROPRIETÁRIO
     if (normalizedEmail === 'diretoria@wsbrasil.com.br' && pass === 'wsbrasil123') {
-      console.log("Nexus Auth: Master Key Aceita (Owner Level)");
       setCurrentUser(MASTER_OWNER);
       setOrg(INITIAL_ORGS[0]);
       setActiveModule(ModuleType.DASHBOARD);
@@ -137,9 +129,7 @@ const App: React.FC = () => {
       return;
     }
 
-    // 2. PRIORIDADE UM: LOGIN MASTER DEVELOPER
     if (normalizedEmail === 'dev@wsbrasil.com' && pass === 'master_ws_2026') {
-      console.log("Nexus Auth: Developer Key Aceita");
       setCurrentUser(MASTER_DEVELOPER);
       setOrg(INITIAL_ORGS[0]);
       setActiveModule(ModuleType.MASTER_ADMIN);
@@ -148,7 +138,6 @@ const App: React.FC = () => {
       return;
     }
 
-    // 3. Admin de Fábrica
     if (normalizedEmail === 'admin' && pass === 'admin2026') {
       const adminUser = users.find(u => u.email === 'admin') || INITIAL_USERS[2];
       setCurrentUser(adminUser);
@@ -159,7 +148,6 @@ const App: React.FC = () => {
       return;
     }
 
-    // 4. Usuários Comuns / Tenants
     let user = users.find(u => u.email.toLowerCase() === normalizedEmail);
     if (user) {
       const userOrg = organizations.find(o => o.id === user?.organizationId);
@@ -219,51 +207,4 @@ const App: React.FC = () => {
              <div className="flex items-center space-x-4 bg-slate-900/80 pl-5 pr-2 py-2 rounded-2xl border border-slate-800 shadow-xl relative group hover:border-amber-500/50 transition-all cursor-pointer">
                 <div className="text-right">
                    <p className="text-xs font-black text-white leading-none">{currentUser!.name}</p>
-                   <p className={`text-[8px] font-bold uppercase tracking-[0.2em] mt-1.5 ${currentUser?.role === 'SUPER_ADMIN' ? 'text-amber-500' : 'text-blue-500'}`}>
-                    {currentUser!.role === 'SUPER_ADMIN' ? 'OWNER AUTHORITY' : currentUser!.role + ' LEVEL'}
-                   </p>
-                </div>
-                <div className={`w-10 h-10 rounded-xl bg-slate-800 border flex items-center justify-center text-slate-400 transition-colors ${currentUser?.role === 'SUPER_ADMIN' ? 'border-amber-500/30 text-amber-600' : 'border-slate-700'}`}>
-                   <i className={`fa-solid ${currentUser?.role === 'SUPER_ADMIN' ? 'fa-crown' : 'fa-user-gear'}`}></i>
-                </div>
-                <div className="absolute top-full right-0 mt-3 w-56 bg-slate-900 border border-slate-800 rounded-[1.5rem] shadow-2xl opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all p-2 z-[200]">
-                   {currentUser?.role === 'SUPER_ADMIN' && (
-                       <button onClick={() => setActiveModule(ModuleType.MASTER_ADMIN)} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-amber-500/10 text-amber-500 rounded-xl transition-colors mb-1">
-                          <i className="fa-solid fa-tower-broadcast text-sm"></i>
-                          <span className="text-[10px] font-black uppercase tracking-widest text-left">Comando Global</span>
-                       </button>
-                   )}
-                   <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-rose-500/10 text-rose-500 rounded-xl transition-colors">
-                      <i className="fa-solid fa-power-off text-sm"></i>
-                      <span className="text-[10px] font-black uppercase tracking-widest text-left">Desconectar Nexus</span>
-                   </button>
-                </div>
-             </div>
-          </div>
-        </header>
-        <section className="max-w-7xl mx-auto pb-24">
-          {activeModule === ModuleType.MASTER_ADMIN && currentUser?.role === 'SUPER_ADMIN' ? (
-            <MasterAdmin organizations={organizations} onUpdateOrgStatus={() => {}} onUpdateOrgSubscription={() => {}} onAddOrg={() => {}} />
-          ) : (
-            <>
-              {activeModule === ModuleType.DASHBOARD && <Dashboard />}
-              {activeModule === ModuleType.MARKETING && <MarketingAI />}
-              {activeModule === ModuleType.SALES && <SalesCRM leads={leads} setLeads={setLeads} />}
-              {activeModule === ModuleType.RH && <RHManager />}
-              {activeModule === ModuleType.FINANCE && <FinancialManager transactions={finance} onAddTransaction={() => {}} onUpdateStatus={() => {}} />}
-              {activeModule === ModuleType.SCHEDULING && <SchedulingManager />}
-              {activeModule === ModuleType.DOCUMENTS && <NexusDocs />}
-              {activeModule === ModuleType.INVENTORY && <InventoryManager items={items} setItems={setItems} />}
-              {activeModule === ModuleType.PRICING && <PricingPage />}
-            </>
-          )}
-        </section>
-      </main>
-      <NexusChat />
-      <NexusVoice />
-      {showUpgradeModal && <UpgradeModal currentPlan={org.subscription} requiredPlan={showUpgradeModal.required} reason={showUpgradeModal.reason} companyName={org.name} onClose={() => setShowUpgradeModal(null)} />}
-    </div>
-  );
-};
-
-export default App;
+                   <p className={`text-[8px] font-bold uppercase tracking-[0.2em] mt-1.5 ${currentUser?.role === 'SUPER_ADMIN' ? 'text-amber-500' : 'text-blue-500'
