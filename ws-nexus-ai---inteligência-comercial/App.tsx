@@ -69,22 +69,41 @@ const App: React.FC = () => {
   const [finance, setFinance] = useState<FinancialTransaction[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([MASTER_OWNER]);
 
-  // --- BUSCA INICIAL NO SUPABASE AO CARREGAR O APP ---
+  // --- BUSCA INICIAL NO SUPABASE (ORGS) ---
   useEffect(() => {
     const fetchOrgs = async () => {
       const { data, error } = await supabase.from('organizations').select('*');
       if (!error && data && data.length > 0) {
-        // Mapeia branding se vier como JSON string do banco
         const mappedOrgs = data.map(o => ({
           ...o,
           branding: typeof o.branding === 'string' ? JSON.parse(o.branding) : o.branding || INITIAL_ORGS[0].branding,
-          pipelineStages: INITIAL_ORGS[0].pipelineStages // Mantém os estágios padrão se não houver no DB
+          pipelineStages: INITIAL_ORGS[0].pipelineStages
         }));
         setOrganizations(mappedOrgs);
       }
     };
     fetchOrgs();
   }, []);
+
+  // --- BUSCA DE USUÁRIOS DO BANCO ---
+  useEffect(() => {
+    const fetchUsers = async () => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('organizationId', org.id);
+      
+      if (!error && data) {
+        // Mapeia fullName do banco de volta para name do frontend se necessário
+        const mappedUsers = data.map(u => ({
+          ...u,
+          name: u.fullName || u.name
+        }));
+        setUsers(mappedUsers.length > 0 ? mappedUsers : [MASTER_OWNER]);
+      }
+    };
+    if (isAuthenticated) fetchUsers();
+  }, [org.id, isAuthenticated]);
 
   useEffect(() => {
     localStorage.setItem('@WSBrasil:orgs', JSON.stringify(organizations));
@@ -121,7 +140,26 @@ const App: React.FC = () => {
     setIsAuthLoading(false);
   }, [organizations]);
 
-  // --- FUNÇÃO DE ADICIONAR COM SINCRONISMO SUPABASE ---
+  // --- FUNÇÃO ADICIONAR USUÁRIO (NEXUS SYNC) ---
+  const handleAddUser = async (userData: Partial<UserProfile>) => {
+    const newUser = {
+      ...userData,
+      id: `USR-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+      organizationId: org.id,
+      isActive: true,
+    };
+
+    const result = await syncEntity('users', [newUser]);
+
+    if (result.success) {
+      setUsers(prev => [...prev, newUser as UserProfile]);
+      alert("Usuário Nexus cadastrado e sincronizado com a Nuvem!");
+    } else {
+      alert(`Erro ao sincronizar usuário: ${result.message}`);
+    }
+  };
+
+  // --- FUNÇÕES MASTER ADMIN ---
   const handleAddOrg = async (newOrgData: Partial<Organization>) => {
     const newOrg: Organization = {
       id: `WS-${Math.random().toString(36).substr(2, 4).toUpperCase()}-${Math.floor(Math.random() * 1000)}`,
@@ -132,151 +170,4 @@ const App: React.FC = () => {
       maxUsers: newOrgData.subscription === 'GOLD' ? 100 : newOrgData.subscription === 'SILVER' ? 50 : 10,
       createdAt: new Date().toISOString().split('T')[0],
       metrics: { usersCount: 1, leadsCount: 0, revenueValue: 0 },
-      branding: { primaryColor: '#C5A059', secondaryColor: '#020617', logoUrl: null },
-      lgpdCompliance: { dataRetentionDays: 180, anonymizeOnDelete: true, dpoContact: '' },
-      pipelineStages: INITIAL_ORGS[0].pipelineStages,
-      customFieldDefinitions: []
-    };
-
-    // Sincroniza com a Nuvem Supabase usando seu serviço
-    const result = await syncEntity('organizations', [newOrg]);
-
-    if (result.success) {
-      setOrganizations(prev => [...prev, newOrg]);
-      alert("Nova licença sincronizada com a Nuvem WS Brasil!");
-    } else {
-      alert(`Falha na Sincronização: ${result.message}`);
-    }
-  };
-
-  const handleUpdateOrgStatus = async (id: string, status: 'ACTIVE' | 'SUSPENDED') => {
-    const updated = organizations.find(o => o.id === id);
-    if (updated) {
-      const result = await syncEntity('organizations', [{ ...updated, status }]);
-      if (result.success) {
-        setOrganizations(prev => prev.map(o => o.id === id ? { ...o, status } : o));
-      }
-    }
-  };
-
-  const handleUpdateOrgSubscription = async (id: string, sub: SubscriptionLevel) => {
-    const updated = organizations.find(o => o.id === id);
-    if (updated) {
-      const maxUsers = sub === 'GOLD' ? 100 : sub === 'SILVER' ? 50 : 10;
-      const result = await syncEntity('organizations', [{ ...updated, subscription: sub, maxUsers }]);
-      if (result.success) {
-        setOrganizations(prev => prev.map(o => o.id === id ? { ...o, subscription: sub, maxUsers } : o));
-      }
-    }
-  };
-
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setIsReadyForAI(false);
-    setCurrentUser(null);
-    setActiveModule(ModuleType.DASHBOARD);
-  };
-
-  if (!isAuthenticated) return <AuthManager onLogin={handleLogin} isLoading={isAuthLoading} />;
-
-  return (
-    <div className="flex min-h-screen bg-slate-950 font-sans selection:bg-amber-500/30">
-      <Sidebar 
-        activeModule={activeModule} 
-        setActiveModule={setActiveModule} 
-        userRole={currentUser?.role || 'VENDEDOR'} 
-        planType={org.subscription}
-      />
-      
-      <main className="flex-1 ml-20 p-8 lg:p-12 overflow-y-auto relative bg-slate-950">
-        <header className="flex justify-between items-center mb-12 animate-fadeIn">
-          <div className="flex items-center space-x-6">
-             <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-xl font-black shadow-lg border border-white/10 bg-[#C5A059]">
-                {org.name[0]}
-             </div>
-             <div className="flex flex-col">
-                <span className="text-white text-lg font-black uppercase tracking-tighter leading-none">{org.name}</span>
-                <div className="flex items-center gap-2 mt-2">
-                   <span className="text-slate-500 text-[9px] font-black uppercase tracking-[0.4em]">Node: {org.id}</span>
-                   {currentUser?.role === 'SUPER_ADMIN' && (
-                     <span className="text-amber-500 text-[8px] font-black uppercase bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 animate-pulse">
-                        Nexus Root Authorization
-                     </span>
-                   )}
-                </div>
-             </div>
-          </div>
-
-          <div className="flex items-center space-x-4">
-             <div className="flex items-center space-x-4 bg-slate-900/80 pl-5 pr-2 py-2 rounded-2xl border border-slate-800 shadow-xl relative group transition-all cursor-pointer">
-                <div className="text-right">
-                   <p className="text-xs font-black text-white leading-none">{currentUser?.name}</p>
-                   <p className="text-[8px] font-bold uppercase tracking-[0.2em] mt-1.5 text-amber-500">
-                    {currentUser?.role === 'SUPER_ADMIN' ? 'OWNER AUTHORITY' : 'USER ACCESS'}
-                   </p>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-slate-800 border border-amber-500/30 flex items-center justify-center text-amber-600">
-                   <i className={`fa-solid ${currentUser?.role === 'SUPER_ADMIN' ? 'fa-crown' : 'fa-user'}`}></i>
-                </div>
-                
-                <div className="absolute top-full right-0 mt-3 w-56 bg-slate-900 border border-slate-800 rounded-[1.5rem] shadow-2xl opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all p-2 z-[200] pointer-events-none group-hover:pointer-events-auto">
-                   {currentUser?.role === 'SUPER_ADMIN' && (
-                     <button onClick={() => setActiveModule(ModuleType.MASTER_ADMIN)} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-amber-500/10 text-amber-500 rounded-xl transition-colors mb-1">
-                        <i className="fa-solid fa-tower-broadcast text-sm"></i>
-                        <span className="text-[10px] font-black uppercase tracking-widest text-left">Comando Global</span>
-                     </button>
-                   )}
-                   <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-rose-500/10 text-rose-500 rounded-xl transition-colors">
-                      <i className="fa-solid fa-power-off text-sm"></i>
-                      <span className="text-[10px] font-black uppercase tracking-widest text-left">Sair do Terminal</span>
-                   </button>
-                </div>
-             </div>
-          </div>
-        </header>
-
-        <section className="max-w-7xl mx-auto pb-24 animate-fadeIn">
-          {activeModule === ModuleType.DASHBOARD && <Dashboard />}
-          {activeModule === ModuleType.MARKETING && <MarketingAI />}
-          {activeModule === ModuleType.SALES && <SalesCRM leads={leads} setLeads={setLeads} />}
-          {activeModule === ModuleType.RH && <RHManager />}
-          {activeModule === ModuleType.FINANCE && <FinancialManager transactions={finance} onAddTransaction={() => {}} onUpdateStatus={() => {}} />}
-          {activeModule === ModuleType.SCHEDULING && <SchedulingManager />}
-          {activeModule === ModuleType.DOCUMENTS && <NexusDocs />}
-          {activeModule === ModuleType.INVENTORY && <InventoryManager items={items} setItems={setItems} />}
-          {activeModule === ModuleType.PRICING && <PricingPage />}
-          
-          {activeModule === ModuleType.SETTINGS && (
-            <SettingsManager 
-              org={org} 
-              onUpdateOrg={setOrg} 
-              users={users} 
-              onAddUser={(u) => setUsers([...users, { ...u, id: Date.now().toString(), organizationId: org.id, isActive: true, mfaEnabled: false } as UserProfile])}
-              onRemoveUser={(id) => setUsers(users.filter(u => u.id !== id))}
-              auditLogs={[]} 
-              userLimit={org.maxUsers} 
-            />
-          )}
-
-          {activeModule === ModuleType.MASTER_ADMIN && currentUser?.role === 'SUPER_ADMIN' && (
-            <MasterAdmin 
-              organizations={organizations} 
-              onUpdateOrgStatus={handleUpdateOrgStatus} 
-              onUpdateOrgSubscription={handleUpdateOrgSubscription} 
-              onAddOrg={handleAddOrg} 
-            />
-          )}
-        </section>
-      </main>
-
-      {isReadyForAI && (
-        <>
-          <NexusChat />
-          <NexusVoice />
-        </>
-      )}
-    </div>
-  );
-};
-
-export default App;
+      branding: { primaryColor: '#C
