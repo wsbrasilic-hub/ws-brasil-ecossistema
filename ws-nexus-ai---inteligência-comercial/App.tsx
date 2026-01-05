@@ -11,12 +11,10 @@ import SchedulingManager from './components/SchedulingManager';
 import FinancialManager from './components/FinancialManager';
 import PricingPage from './components/PricingPage';
 import AuthManager from './components/AuthManager';
-import PasswordReset from './components/PasswordReset';
 import NexusChat from './components/NexusChat';
-import UpgradeModal from './components/UpgradeModal';
 import NexusVoice from './components/NexusVoice';
-import SettingsManager from './components/SettingsManager'; // IMPORTANTE
-import MasterAdmin from './components/MasterAdmin'; // IMPORTANTE
+import SettingsManager from './components/SettingsManager'; 
+import MasterAdmin from './components/MasterAdmin';
 
 const INITIAL_ORGS: Organization[] = [
   {
@@ -56,13 +54,23 @@ const App: React.FC = () => {
   const [isReadyForAI, setIsReadyForAI] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [activeModule, setActiveModule] = useState<ModuleType>(ModuleType.DASHBOARD);
-  const [org, setOrg] = useState<Organization>(INITIAL_ORGS[0]);
+  
+  // ESTADO DE ORGANIZAÇÕES COM PERSISTÊNCIA (LOCALSTORAGE)
+  const [organizations, setOrganizations] = useState<Organization[]>(() => {
+    const saved = localStorage.getItem('@WSBrasil:orgs');
+    return saved ? JSON.parse(saved) : INITIAL_ORGS;
+  });
 
-  // Estados de Dados
+  const [org, setOrg] = useState<Organization>(organizations[0]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [items, setItems] = useState<ProductItem[]>([]);
   const [finance, setFinance] = useState<FinancialTransaction[]>([]);
-  const [users, setUsers] = useState<UserProfile[]>([MASTER_OWNER]); // Estado para gestão de usuários
+  const [users, setUsers] = useState<UserProfile[]>([MASTER_OWNER]);
+
+  // Sincroniza a organização ativa sempre que a lista de orgs mudar
+  useEffect(() => {
+    localStorage.setItem('@WSBrasil:orgs', JSON.stringify(organizations));
+  }, [organizations]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -78,7 +86,7 @@ const App: React.FC = () => {
     
     if (normalizedEmail === 'diretoria@wsbrasil.com.br' && pass === 'wsbrasil123') {
       setCurrentUser(MASTER_OWNER);
-      setOrg(INITIAL_ORGS[0]);
+      setOrg(organizations[0]);
       setIsAuthenticated(true);
       return;
     }
@@ -93,7 +101,39 @@ const App: React.FC = () => {
       alert("Nexus: Credenciais Inválidas.");
     }
     setIsAuthLoading(false);
-  }, []);
+  }, [organizations]);
+
+  // FUNÇÕES DO MASTER ADMIN (COMANDO GLOBAL)
+  const handleAddOrg = (newOrgData: Partial<Organization>) => {
+    const newOrg: Organization = {
+      id: `ORG-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
+      name: newOrgData.name || 'Nova Empresa Cliente',
+      cnpj: newOrgData.cnpj || '00.000.000/0001-00',
+      subscription: newOrgData.subscription || 'BRONZE',
+      status: 'ACTIVE',
+      maxUsers: newOrgData.subscription === 'GOLD' ? 100 : newOrgData.subscription === 'SILVER' ? 50 : 10,
+      createdAt: new Date().toISOString().split('T')[0],
+      metrics: { usersCount: 1, leadsCount: 0, revenueValue: 0 },
+      branding: { primaryColor: '#C5A059', secondaryColor: '#020617', logoUrl: null },
+      lgpdCompliance: { dataRetentionDays: 180, anonymizeOnDelete: true, dpoContact: '' },
+      pipelineStages: INITIAL_ORGS[0].pipelineStages,
+      customFieldDefinitions: []
+    };
+    setOrganizations(prev => [...prev, newOrg]);
+    alert("Nova licença gerada com sucesso no Ecossistema!");
+  };
+
+  const handleUpdateOrgStatus = (id: string, status: 'ACTIVE' | 'SUSPENDED') => {
+    setOrganizations(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+  };
+
+  const handleUpdateOrgSubscription = (id: string, sub: SubscriptionLevel) => {
+    setOrganizations(prev => prev.map(o => o.id === id ? { 
+      ...o, 
+      subscription: sub, 
+      maxUsers: sub === 'GOLD' ? 100 : sub === 'SILVER' ? 50 : 10 
+    } : o));
+  };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
@@ -133,7 +173,7 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center space-x-4">
-             <div className="flex items-center space-x-4 bg-slate-900/80 pl-5 pr-2 py-2 rounded-2xl border border-slate-800 shadow-xl relative group hover:border-amber-500/50 transition-all cursor-pointer">
+             <div className="flex items-center space-x-4 bg-slate-900/80 pl-5 pr-2 py-2 rounded-2xl border border-slate-800 shadow-xl relative group transition-all cursor-pointer">
                 <div className="text-right">
                    <p className="text-xs font-black text-white leading-none">{currentUser?.name}</p>
                    <p className="text-[8px] font-bold uppercase tracking-[0.2em] mt-1.5 text-amber-500">
@@ -143,6 +183,7 @@ const App: React.FC = () => {
                 <div className="w-10 h-10 rounded-xl bg-slate-800 border border-amber-500/30 flex items-center justify-center text-amber-600">
                    <i className={`fa-solid ${currentUser?.role === 'SUPER_ADMIN' ? 'fa-crown' : 'fa-user'}`}></i>
                 </div>
+                
                 <div className="absolute top-full right-0 mt-3 w-56 bg-slate-900 border border-slate-800 rounded-[1.5rem] shadow-2xl opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all p-2 z-[200] pointer-events-none group-hover:pointer-events-auto">
                    {currentUser?.role === 'SUPER_ADMIN' && (
                      <button onClick={() => setActiveModule(ModuleType.MASTER_ADMIN)} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-amber-500/10 text-amber-500 rounded-xl transition-colors mb-1">
@@ -170,7 +211,6 @@ const App: React.FC = () => {
           {activeModule === ModuleType.INVENTORY && <InventoryManager items={items} setItems={setItems} />}
           {activeModule === ModuleType.PRICING && <PricingPage />}
           
-          {/* RENDERIZAÇÃO DO MÓDULO DE CONFIGURAÇÕES */}
           {activeModule === ModuleType.SETTINGS && (
             <SettingsManager 
               org={org} 
@@ -183,9 +223,13 @@ const App: React.FC = () => {
             />
           )}
 
-          {/* RENDERIZAÇÃO DO MASTER ADMIN */}
           {activeModule === ModuleType.MASTER_ADMIN && currentUser?.role === 'SUPER_ADMIN' && (
-            <MasterAdmin organizations={[org]} onUpdateOrgStatus={() => {}} onUpdateOrgSubscription={() => {}} onAddOrg={() => {}} />
+            <MasterAdmin 
+              organizations={organizations} 
+              onUpdateOrgStatus={handleUpdateOrgStatus} 
+              onUpdateOrgSubscription={handleUpdateOrgSubscription} 
+              onAddOrg={handleAddOrg} 
+            />
           )}
         </section>
       </main>
