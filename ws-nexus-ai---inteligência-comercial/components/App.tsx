@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ModuleType, ProductItem, Organization, UserProfile, SubscriptionLevel, FinancialTransaction, TransactionStatus, AuditLog, UserRole, Lead } from './types';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -17,6 +17,9 @@ import PasswordReset from './components/PasswordReset';
 import NexusChat from './components/NexusChat';
 import UpgradeModal from './components/UpgradeModal';
 import NexusVoice from './components/NexusVoice';
+
+// Importação do Ecossistema WS Brasil Nexus (Supabase)
+import { supabase, syncEntity } from './services/supabase';
 
 const INITIAL_ORGS: Organization[] = [
   {
@@ -50,22 +53,6 @@ const MASTER_OWNER: UserProfile = {
   mfaEnabled: true 
 };
 
-const MASTER_DEVELOPER: UserProfile = { 
-  id: 'master-dev', 
-  name: 'Desenvolvedor Master', 
-  email: 'dev@wsbrasil.com', 
-  role: 'SUPER_ADMIN', 
-  organizationId: 'ORG-WS-001', 
-  isActive: true, 
-  mfaEnabled: true 
-};
-
-const INITIAL_USERS: UserProfile[] = [
-  MASTER_OWNER,
-  MASTER_DEVELOPER,
-  { id: 'u1', name: 'Admin WS Brasil', email: 'admin', role: 'ADM', organizationId: 'ORG-WS-001', isActive: true, mfaEnabled: false },
-];
-
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
@@ -76,22 +63,50 @@ const App: React.FC = () => {
   const [activeModule, setActiveModule] = useState<ModuleType>(ModuleType.DASHBOARD);
   const [showUpgradeModal, setShowUpgradeModal] = useState<{ required: SubscriptionLevel, reason: string } | null>(null);
 
-  // --- ESTADOS COM PERSISTÊNCIA ---
-  const [organizations, setOrganizations] = useState<Organization[]>(() => {
-    const saved = localStorage.getItem('@wsbrasil:organizations');
-    return saved ? JSON.parse(saved) : INITIAL_ORGS;
-  });
-
-  const [org, setOrg] = useState<Organization>(organizations[0]);
-  const [users, setUsers] = useState<UserProfile[]>(INITIAL_USERS);
+  // --- ESTADOS COM SINCRONISMO NAVE/NUVEM ---
+  const [organizations, setOrganizations] = useState<Organization[]>(INITIAL_ORGS);
+  const [org, setOrg] = useState<Organization>(INITIAL_ORGS[0]);
+  const [users, setUsers] = useState<UserProfile[]>([MASTER_OWNER]);
   const [items, setItems] = useState<ProductItem[]>([]);
   const [finance, setFinance] = useState<FinancialTransaction[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
 
-  // Salvar sempre que houver mudança nas organizações
+  // --- CARREGAMENTO INICIAL SUPABASE ---
   useEffect(() => {
-    localStorage.setItem('@wsbrasil:organizations', JSON.stringify(organizations));
-  }, [organizations]);
+    const bootstrapNexus = async () => {
+      setConnectionStatus('SYNCING');
+      const { data, error } = await supabase.from('organizations').select('*');
+      
+      if (!error && data && data.length > 0) {
+        const mappedOrgs = data.map(o => ({
+          ...o,
+          branding: typeof o.branding === 'string' ? JSON.parse(o.branding) : o.branding || INITIAL_ORGS[0].branding,
+          pipelineStages: INITIAL_ORGS[0].pipelineStages
+        }));
+        setOrganizations(mappedOrgs);
+        setConnectionStatus('CONNECTED');
+      } else if (error) {
+        setConnectionStatus('ERROR');
+      }
+    };
+    bootstrapNexus();
+  }, []);
+
+  // --- BUSCA USUÁRIOS QUANDO A ORG MUDA ---
+  useEffect(() => {
+    const fetchUsers = async () => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('organizationId', org.id);
+      
+      if (!error && data) {
+        const mappedUsers = data.map(u => ({ ...u, name: u.fullName || u.name }));
+        setUsers(mappedUsers.length > 0 ? mappedUsers : [MASTER_OWNER]);
+      }
+    };
+    if (isAuthenticated) fetchUsers();
+  }, [org.id, isAuthenticated]);
 
   const PLAN_RULES = {
     BRONZE: { modules: [ModuleType.DASHBOARD, ModuleType.SALES, ModuleType.SCHEDULING, ModuleType.PRICING], maxUsers: 3 },
@@ -101,10 +116,8 @@ const App: React.FC = () => {
 
   const checkModuleAccess = (module: ModuleType) => {
     if (currentUser?.role === 'SUPER_ADMIN') return true;
-    if (module === ModuleType.PRICING) return true;
     const allowedModules = PLAN_RULES[org.subscription].modules;
-    const hasAccess = allowedModules.includes(module);
-    if (!hasAccess) {
+    if (!allowedModules.includes(module)) {
       const required = (module === ModuleType.RH || module === ModuleType.MARKETING) ? 'SILVER' as SubscriptionLevel : 'GOLD' as SubscriptionLevel;
       setShowUpgradeModal({ required, reason: `O módulo ${module} exige o nível ${required} de inteligência processual.` });
       return false;
@@ -112,81 +125,112 @@ const App: React.FC = () => {
     return true;
   };
 
-  const handleSetActiveModule = (module: ModuleType) => {
-    if (checkModuleAccess(module)) setActiveModule(module);
-  };
-
   const handleLogin = async (email: string, pass: string) => {
     setIsAuthLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 800));
     const normalizedEmail = email.toLowerCase().trim();
 
+    // Login Master Root
     if (normalizedEmail === 'diretoria@wsbrasil.com.br' && pass === 'wsbrasil123') {
       setCurrentUser(MASTER_OWNER);
       setOrg(organizations[0]);
-      setActiveModule(ModuleType.DASHBOARD);
       setIsAuthenticated(true);
       setIsAuthLoading(false);
       return;
     }
 
-    if (normalizedEmail === 'dev@wsbrasil.com' && pass === 'master_ws_2026') {
-      setCurrentUser(MASTER_DEVELOPER);
-      setOrg(organizations[0]);
-      setActiveModule(ModuleType.MASTER_ADMIN);
-      setIsAuthenticated(true);
-      setIsAuthLoading(false);
-      return;
-    }
+    // Busca usuário no banco para login
+    const { data: dbUser, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', normalizedEmail)
+      .single();
 
-    let user = users.find(u => u.email.toLowerCase() === normalizedEmail);
-    if (user) {
-      const userOrg = organizations.find(o => o.id === user?.organizationId);
-      if (!userOrg || userOrg.status !== 'ACTIVE') {
-        alert("Instância suspensa. Contate diretoria@wsbrasil.com.br");
-        setIsAuthLoading(false);
-        return;
+    if (!error && dbUser && pass === 'admin2026') { // Senha padrão temporária
+      const userOrg = organizations.find(o => o.id === dbUser.organizationId);
+      if (userOrg?.status === 'ACTIVE') {
+        setCurrentUser({ ...dbUser, name: dbUser.fullName || dbUser.name });
+        setOrg(userOrg);
+        setIsAuthenticated(true);
+      } else {
+        alert("Instância suspensa ou não localizada.");
       }
-      setCurrentUser(user);
-      setOrg(userOrg);
-      setIsAuthenticated(true);
     } else {
       alert("Credenciais Nexus não localizadas.");
     }
     setIsAuthLoading(false);
   };
 
-  // --- FUNÇÕES MASTER ADMIN (CRUD REAL) ---
-  const handleAddOrg = (newOrgData: Partial<Organization>) => {
+  // --- AÇÕES SINCRONIZADAS (USERS) ---
+  const handleAddUser = async (userData: Partial<UserProfile>) => {
+    const newUser = {
+      ...userData,
+      id: `USR-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+      organizationId: org.id,
+      isActive: true,
+    };
+
+    setIsCloudSyncing(true);
+    const result = await syncEntity('users', [newUser]);
+    setIsCloudSyncing(false);
+
+    if (result.success) {
+      setUsers(prev => [...prev, newUser as UserProfile]);
+      alert("Usuário Nexus sincronizado com a Nuvem!");
+    } else {
+      alert(`Erro: ${result.message}`);
+    }
+  };
+
+  const handleRemoveUser = async (id: string) => {
+    if (id === 'owner-ws-root') return;
+    if (confirm("Deseja revogar este acesso permanentemente?")) {
+      setIsCloudSyncing(true);
+      const { error } = await supabase.from('users').delete().eq('id', id);
+      setIsCloudSyncing(false);
+      
+      if (!error) {
+        setUsers(prev => prev.filter(u => u.id !== id));
+      } else {
+        alert("Erro ao remover: " + error.message);
+      }
+    }
+  };
+
+  // --- AÇÕES MASTER ADMIN (ORGS) ---
+  const handleAddOrg = async (newOrgData: Partial<Organization>) => {
     const newOrg: Organization = {
       id: `WS-${Math.random().toString(36).substr(2, 4).toUpperCase()}-${Math.floor(Math.random() * 1000)}`,
-      name: newOrgData.name || 'Nova Empresa',
-      cnpj: newOrgData.cnpj || '00.000.000/0001-00',
-      subscription: newOrgData.subscription || 'BRONZE',
+      ...newOrgData,
       status: 'ACTIVE',
-      maxUsers: newOrgData.subscription === 'GOLD' ? 100 : 10,
       createdAt: new Date().toISOString(),
       metrics: { usersCount: 1, leadsCount: 0, revenueValue: 0 },
       branding: { primaryColor: '#C5A059', secondaryColor: '#020617', logoUrl: null },
-      lgpdCompliance: { dataRetentionDays: 180, anonymizeOnDelete: true, dpoContact: '' },
       pipelineStages: INITIAL_ORGS[0].pipelineStages,
-      customFieldDefinitions: []
-    };
-    setOrganizations(prev => [...prev, newOrg]);
+    } as Organization;
+
+    const result = await syncEntity('organizations', [newOrg]);
+    if (result.success) setOrganizations(prev => [...prev, newOrg]);
   };
 
-  const handleUpdateStatus = (id: string, status: 'ACTIVE' | 'SUSPENDED') => {
-    setOrganizations(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+  const handleUpdateStatus = async (id: string, status: 'ACTIVE' | 'SUSPENDED') => {
+    const target = organizations.find(o => o.id === id);
+    if (target) {
+      const result = await syncEntity('organizations', [{ ...target, status }]);
+      if (result.success) setOrganizations(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+    }
   };
 
-  const handleUpdateSub = (id: string, level: SubscriptionLevel) => {
-    setOrganizations(prev => prev.map(o => o.id === id ? { ...o, subscription: level } : o));
+  const handleUpdateSub = async (id: string, level: SubscriptionLevel) => {
+    const target = organizations.find(o => o.id === id);
+    if (target) {
+      const result = await syncEntity('organizations', [{ ...target, subscription: level }]);
+      if (result.success) setOrganizations(prev => prev.map(o => o.id === id ? { ...o, subscription: level } : o));
+    }
   };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
     setCurrentUser(null);
-    setMustResetPassword(false);
     setActiveModule(ModuleType.DASHBOARD);
   };
 
@@ -197,13 +241,13 @@ const App: React.FC = () => {
     <div className="flex min-h-screen bg-slate-950">
       <Sidebar 
         activeModule={activeModule} 
-        setActiveModule={handleSetActiveModule} 
+        setActiveModule={(m) => checkModuleAccess(m) && setActiveModule(m)} 
         userRole={currentUser!.role} 
         planType={org.subscription}
         isCloudSyncing={isCloudSyncing}
         connectionStatus={connectionStatus}
       />
-      <main className="flex-1 ml-20 transition-all duration-300 p-8 lg:p-12 overflow-y-auto relative bg-slate-950">
+      <main className="flex-1 ml-20 p-8 lg:p-12 overflow-y-auto relative bg-slate-950">
         <header className="flex justify-between items-center mb-12">
           <div className="flex items-center space-x-6">
              <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-xl font-black shadow-lg border border-white/10" style={{ backgroundColor: org.branding.primaryColor }}>
@@ -258,8 +302,8 @@ const App: React.FC = () => {
               org={org} 
               onUpdateOrg={setOrg} 
               users={users} 
-              onAddUser={(u) => setUsers([...users, { ...u, id: Date.now().toString(), organizationId: org.id, isActive: true, mfaEnabled: false } as UserProfile])}
-              onRemoveUser={(id) => setUsers(users.filter(u => u.id !== id))}
+              onAddUser={handleAddUser}
+              onRemoveUser={handleRemoveUser}
               auditLogs={[]} 
               userLimit={org.maxUsers} 
             />
