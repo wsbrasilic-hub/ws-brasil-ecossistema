@@ -18,6 +18,17 @@ const SettingsManager: React.FC<SettingsManagerProps> = ({ org, onUpdateOrg, use
 
   const isAtLimit = users.length >= userLimit;
 
+  const handleInvite = () => {
+    if (!newUser.name || !newUser.email) {
+      alert("Por favor, preencha nome e e-mail.");
+      return;
+    }
+    // Chama a função que vem do App.tsx (que agora salva no Supabase)
+    onAddUser(newUser);
+    setShowInviteModal(false);
+    setNewUser({ name: '', email: '', role: 'VENDEDOR' });
+  };
+
   return (
     <div className="space-y-8 animate-fadeIn pb-24">
       {/* HEADER DE COMANDO */}
@@ -118,7 +129,7 @@ const SettingsManager: React.FC<SettingsManagerProps> = ({ org, onUpdateOrg, use
                       <div key={user.id} className="bg-slate-950 p-6 rounded-3xl border border-slate-800 flex items-center justify-between group transition-all hover:border-amber-500/30">
                          <div className="flex items-center gap-6">
                             <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-white font-black overflow-hidden shadow-inner uppercase">
-                               {user.name[0]}
+                               {user.name?.[0] || 'U'}
                             </div>
                             <div>
                                <p className="text-white font-bold">{user.name}</p>
@@ -142,24 +153,47 @@ const SettingsManager: React.FC<SettingsManagerProps> = ({ org, onUpdateOrg, use
              </div>
            )}
 
-           {/* ABA: DADOS (CORRIGIDA) */}
-           {activeTab === 'FIELDS' && (
-             <div className="bg-slate-900/50 rounded-[3rem] border border-slate-800 p-10 shadow-2xl space-y-8 animate-fadeIn">
-                <div className="flex justify-between items-center border-b border-slate-800 pb-6">
-                   <div>
-                      <h3 className="text-xl font-black text-white uppercase tracking-tight">Métricas & Dados da Instância</h3>
-                      <p className="text-[9px] text-amber-500 font-bold uppercase mt-1 tracking-widest">Telemetria WS Brasil</p>
+           {/* MODAL DE CONVITE */}
+           {showInviteModal && (
+             <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
+               <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl animate-scaleIn">
+                 <h3 className="text-xl font-black text-white uppercase tracking-tighter mb-6">Novo Operador Nexus</h3>
+                 <div className="space-y-4">
+                   <input 
+                     type="text" 
+                     placeholder="Nome Completo"
+                     className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white"
+                     value={newUser.name}
+                     onChange={e => setNewUser({...newUser, name: e.target.value})}
+                   />
+                   <input 
+                     type="email" 
+                     placeholder="E-mail Corporativo"
+                     className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white"
+                     value={newUser.email}
+                     onChange={e => setNewUser({...newUser, email: e.target.value})}
+                   />
+                   <select 
+                     className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white font-bold"
+                     value={newUser.role}
+                     onChange={e => setNewUser({...newUser, role: e.target.value as UserRole})}
+                   >
+                     <option value="VENDEDOR">Vendedor</option>
+                     <option value="ADM">Administrador</option>
+                     <option value="GERENTE">Gerente</option>
+                   </select>
+                   <div className="flex gap-3 mt-6">
+                     <button onClick={() => setShowInviteModal(false)} className="flex-1 px-6 py-4 rounded-2xl bg-slate-800 text-white font-black uppercase text-[10px]">Cancelar</button>
+                     <button onClick={handleInvite} className="flex-1 px-6 py-4 rounded-2xl bg-amber-600 text-slate-950 font-black uppercase text-[10px]">Ativar Acesso</button>
                    </div>
-                   <i className="fa-solid fa-database text-3xl text-amber-500"></i>
-                </div>
+                 </div>
+               </div>
+             </div>
+           )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                   <div className="bg-slate-950 p-8 rounded-3xl border border-slate-800">
-                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-2">Leads em Prospecção</p>
-                      <p className="text-4xl font-black text-white">{org.metrics.leadsCount}</p>
-                      <div className="w-full bg-slate-900 h-1.5 rounded-full mt-4 overflow-hidden">
-                         <div className="bg-amber-500 h-full w-[65%]"></div>
-                      </div>
-                   </div>
-
-                   <div className="bg-
+export default SettingsManager;
