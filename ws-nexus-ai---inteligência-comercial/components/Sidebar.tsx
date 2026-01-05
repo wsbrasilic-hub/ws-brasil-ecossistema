@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { ModuleType, UserRole, SubscriptionLevel } from '../types';
 
@@ -33,6 +32,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeModule, setActiveModule, userRo
     { type: ModuleType.SETTINGS, label: 'Configurações', icon: 'fa-solid fa-gear', userPermission: ['ADM', 'SUPER_ADMIN'] },
   ];
 
+  // Filtra itens por cargo (Role-Based Access Control)
   const menuItems = allMenuItems.filter(item => 
     !item.userPermission || item.userPermission.includes(userRole)
   );
@@ -59,13 +59,15 @@ const Sidebar: React.FC<SidebarProps> = ({ activeModule, setActiveModule, userRo
         {menuItems.map((item) => {
           const isActive = activeModule === item.type;
           
-          // BYPASS DE BLOQUEIO PARA SUPER_ADMIN
-          const isLocked = userRole !== 'SUPER_ADMIN' && !planPermissions[planType].includes(item.type);
+          // Lógica de Bloqueio: SUPER_ADMIN ignora travas de plano. O módulo SETTINGS também é liberado se o user tiver permissão de cargo.
+          const isLocked = userRole !== 'SUPER_ADMIN' && 
+                           item.type !== ModuleType.SETTINGS && 
+                           !planPermissions[planType].includes(item.type);
           
           return (
             <button
               key={item.type}
-              onClick={() => setActiveModule(item.type)}
+              onClick={() => !isLocked && setActiveModule(item.type)}
               className={`w-full flex items-center h-12 rounded-xl transition-all relative group/btn overflow-hidden ${
                 isActive 
                   ? 'bg-amber-500/10 text-white font-bold border border-amber-500/20' 
@@ -89,6 +91,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeModule, setActiveModule, userRo
         })}
       </nav>
 
+      {/* FOOTER - STATUS DA CONEXÃO */}
       <div className="p-4 border-t border-slate-800 mt-auto bg-slate-950/50">
         <div className="flex items-center gap-4 group/status cursor-help">
           <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 shadow-inner">
