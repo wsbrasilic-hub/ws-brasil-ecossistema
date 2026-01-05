@@ -16,6 +16,9 @@ import NexusVoice from './components/NexusVoice';
 import SettingsManager from './components/SettingsManager'; 
 import MasterAdmin from './components/MasterAdmin';
 
+// Importação do Sincronizador WS Brasil Nexus
+import { supabase, syncEntity } from './services/supabase';
+
 const INITIAL_ORGS: Organization[] = [
   {
     id: 'ORG-WS-001',
@@ -55,7 +58,6 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [activeModule, setActiveModule] = useState<ModuleType>(ModuleType.DASHBOARD);
   
-  // ESTADO DE ORGANIZAÇÕES COM PERSISTÊNCIA (LOCALSTORAGE)
   const [organizations, setOrganizations] = useState<Organization[]>(() => {
     const saved = localStorage.getItem('@WSBrasil:orgs');
     return saved ? JSON.parse(saved) : INITIAL_ORGS;
@@ -67,7 +69,23 @@ const App: React.FC = () => {
   const [finance, setFinance] = useState<FinancialTransaction[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([MASTER_OWNER]);
 
-  // Sincroniza a organização ativa sempre que a lista de orgs mudar
+  // --- BUSCA INICIAL NO SUPABASE AO CARREGAR O APP ---
+  useEffect(() => {
+    const fetchOrgs = async () => {
+      const { data, error } = await supabase.from('organizations').select('*');
+      if (!error && data && data.length > 0) {
+        // Mapeia branding se vier como JSON string do banco
+        const mappedOrgs = data.map(o => ({
+          ...o,
+          branding: typeof o.branding === 'string' ? JSON.parse(o.branding) : o.branding || INITIAL_ORGS[0].branding,
+          pipelineStages: INITIAL_ORGS[0].pipelineStages // Mantém os estágios padrão se não houver no DB
+        }));
+        setOrganizations(mappedOrgs);
+      }
+    };
+    fetchOrgs();
+  }, []);
+
   useEffect(() => {
     localStorage.setItem('@WSBrasil:orgs', JSON.stringify(organizations));
   }, [organizations]);
@@ -103,10 +121,10 @@ const App: React.FC = () => {
     setIsAuthLoading(false);
   }, [organizations]);
 
-  // FUNÇÕES DO MASTER ADMIN (COMANDO GLOBAL)
-  const handleAddOrg = (newOrgData: Partial<Organization>) => {
+  // --- FUNÇÃO DE ADICIONAR COM SINCRONISMO SUPABASE ---
+  const handleAddOrg = async (newOrgData: Partial<Organization>) => {
     const newOrg: Organization = {
-      id: `ORG-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
+      id: `WS-${Math.random().toString(36).substr(2, 4).toUpperCase()}-${Math.floor(Math.random() * 1000)}`,
       name: newOrgData.name || 'Nova Empresa Cliente',
       cnpj: newOrgData.cnpj || '00.000.000/0001-00',
       subscription: newOrgData.subscription || 'BRONZE',
@@ -119,20 +137,37 @@ const App: React.FC = () => {
       pipelineStages: INITIAL_ORGS[0].pipelineStages,
       customFieldDefinitions: []
     };
-    setOrganizations(prev => [...prev, newOrg]);
-    alert("Nova licença gerada com sucesso no Ecossistema!");
+
+    // Sincroniza com a Nuvem Supabase usando seu serviço
+    const result = await syncEntity('organizations', [newOrg]);
+
+    if (result.success) {
+      setOrganizations(prev => [...prev, newOrg]);
+      alert("Nova licença sincronizada com a Nuvem WS Brasil!");
+    } else {
+      alert(`Falha na Sincronização: ${result.message}`);
+    }
   };
 
-  const handleUpdateOrgStatus = (id: string, status: 'ACTIVE' | 'SUSPENDED') => {
-    setOrganizations(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+  const handleUpdateOrgStatus = async (id: string, status: 'ACTIVE' | 'SUSPENDED') => {
+    const updated = organizations.find(o => o.id === id);
+    if (updated) {
+      const result = await syncEntity('organizations', [{ ...updated, status }]);
+      if (result.success) {
+        setOrganizations(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+      }
+    }
   };
 
-  const handleUpdateOrgSubscription = (id: string, sub: SubscriptionLevel) => {
-    setOrganizations(prev => prev.map(o => o.id === id ? { 
-      ...o, 
-      subscription: sub, 
-      maxUsers: sub === 'GOLD' ? 100 : sub === 'SILVER' ? 50 : 10 
-    } : o));
+  const handleUpdateOrgSubscription = async (id: string, sub: SubscriptionLevel) => {
+    const updated = organizations.find(o => o.id === id);
+    if (updated) {
+      const maxUsers = sub === 'GOLD' ? 100 : sub === 'SILVER' ? 50 : 10;
+      const result = await syncEntity('organizations', [{ ...updated, subscription: sub, maxUsers }]);
+      if (result.success) {
+        setOrganizations(prev => prev.map(o => o.id === id ? { ...o, subscription: sub, maxUsers } : o));
+      }
+    }
   };
 
   const handleLogout = () => {
