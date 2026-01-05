@@ -1,22 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { ModuleType, ProductItem, Organization, UserProfile, SubscriptionLevel, FinancialTransaction, TransactionStatus, AuditLog, UserRole, Lead } from '../types';
-import Sidebar from './Sidebar';
-import Dashboard from './Dashboard';
-import MarketingAI from './MarketingAI';
-import SalesCRM from './SalesCRM';
-import NexusDocs from './NexusDocs';
-import InventoryManager from './InventoryManager';
-import RHManager from './RHManager';
-import SchedulingManager from './SchedulingManager';
-import SettingsManager from './SettingsManager';
-import FinancialManager from './FinancialManager';
-import MasterAdmin from './MasterAdmin';
-import PricingPage from './PricingPage';
-import AuthManager from './AuthManager';
-import PasswordReset from './PasswordReset';
-import NexusChat from './NexusChat';
-import UpgradeModal from './UpgradeModal';
-import NexusVoice from './NexusVoice';
+import { ModuleType, ProductItem, Organization, UserProfile, SubscriptionLevel, FinancialTransaction, TransactionStatus, AuditLog, UserRole, Lead } from './types';
+import Sidebar from './components/Sidebar';
+import Dashboard from './components/Dashboard';
+import MarketingAI from './components/MarketingAI';
+import SalesCRM from './components/SalesCRM';
+import NexusDocs from './components/NexusDocs';
+import InventoryManager from './components/InventoryManager';
+import RHManager from './components/RHManager';
+import SchedulingManager from './components/SchedulingManager';
+import SettingsManager from './components/SettingsManager';
+import FinancialManager from './components/FinancialManager';
+import MasterAdmin from './components/MasterAdmin';
+import PricingPage from './components/PricingPage';
+import AuthManager from './components/AuthManager';
+import PasswordReset from './components/PasswordReset';
+import NexusChat from './components/NexusChat';
+import UpgradeModal from './components/UpgradeModal';
+import NexusVoice from './components/NexusVoice';
 
 const INITIAL_ORGS: Organization[] = [
   {
@@ -40,7 +40,6 @@ const INITIAL_ORGS: Organization[] = [
   }
 ];
 
-// PERFIL MASTER PROPRIETÁRIO - ROOT ACCESS
 const MASTER_OWNER: UserProfile = { 
   id: 'owner-ws-root', 
   name: 'Proprietário WS Brasil', 
@@ -77,13 +76,22 @@ const App: React.FC = () => {
   const [activeModule, setActiveModule] = useState<ModuleType>(ModuleType.DASHBOARD);
   const [showUpgradeModal, setShowUpgradeModal] = useState<{ required: SubscriptionLevel, reason: string } | null>(null);
 
-  // ESTADOS GLOBAIS
-  const [items, setItems] = useState<ProductItem[]>([]);
+  // --- ESTADOS COM PERSISTÊNCIA ---
+  const [organizations, setOrganizations] = useState<Organization[]>(() => {
+    const saved = localStorage.getItem('@wsbrasil:organizations');
+    return saved ? JSON.parse(saved) : INITIAL_ORGS;
+  });
+
+  const [org, setOrg] = useState<Organization>(organizations[0]);
   const [users, setUsers] = useState<UserProfile[]>(INITIAL_USERS);
+  const [items, setItems] = useState<ProductItem[]>([]);
   const [finance, setFinance] = useState<FinancialTransaction[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [organizations, setOrganizations] = useState<Organization[]>(INITIAL_ORGS);
-  const [org, setOrg] = useState<Organization>(INITIAL_ORGS[0]);
+
+  // Salvar sempre que houver mudança nas organizações
+  useEffect(() => {
+    localStorage.setItem('@wsbrasil:organizations', JSON.stringify(organizations));
+  }, [organizations]);
 
   const PLAN_RULES = {
     BRONZE: { modules: [ModuleType.DASHBOARD, ModuleType.SALES, ModuleType.SCHEDULING, ModuleType.PRICING], maxUsers: 3 },
@@ -94,25 +102,18 @@ const App: React.FC = () => {
   const checkModuleAccess = (module: ModuleType) => {
     if (currentUser?.role === 'SUPER_ADMIN') return true;
     if (module === ModuleType.PRICING) return true;
-
     const allowedModules = PLAN_RULES[org.subscription].modules;
     const hasAccess = allowedModules.includes(module);
-    
     if (!hasAccess) {
       const required = (module === ModuleType.RH || module === ModuleType.MARKETING) ? 'SILVER' as SubscriptionLevel : 'GOLD' as SubscriptionLevel;
-      setShowUpgradeModal({ 
-        required, 
-        reason: `O módulo ${module} exige o nível ${required} de inteligência processual.` 
-      });
+      setShowUpgradeModal({ required, reason: `O módulo ${module} exige o nível ${required} de inteligência processual.` });
       return false;
     }
     return true;
   };
 
   const handleSetActiveModule = (module: ModuleType) => {
-    if (checkModuleAccess(module)) {
-      setActiveModule(module);
-    }
+    if (checkModuleAccess(module)) setActiveModule(module);
   };
 
   const handleLogin = async (email: string, pass: string) => {
@@ -122,7 +123,7 @@ const App: React.FC = () => {
 
     if (normalizedEmail === 'diretoria@wsbrasil.com.br' && pass === 'wsbrasil123') {
       setCurrentUser(MASTER_OWNER);
-      setOrg(INITIAL_ORGS[0]);
+      setOrg(organizations[0]);
       setActiveModule(ModuleType.DASHBOARD);
       setIsAuthenticated(true);
       setIsAuthLoading(false);
@@ -131,18 +132,8 @@ const App: React.FC = () => {
 
     if (normalizedEmail === 'dev@wsbrasil.com' && pass === 'master_ws_2026') {
       setCurrentUser(MASTER_DEVELOPER);
-      setOrg(INITIAL_ORGS[0]);
+      setOrg(organizations[0]);
       setActiveModule(ModuleType.MASTER_ADMIN);
-      setIsAuthenticated(true);
-      setIsAuthLoading(false);
-      return;
-    }
-
-    if (normalizedEmail === 'admin' && pass === 'admin2026') {
-      const adminUser = users.find(u => u.email === 'admin') || INITIAL_USERS[2];
-      setCurrentUser(adminUser);
-      setOrg(organizations.find(o => o.id === adminUser.organizationId) || INITIAL_ORGS[0]);
-      setMustResetPassword(true);
       setIsAuthenticated(true);
       setIsAuthLoading(false);
       return;
@@ -163,6 +154,33 @@ const App: React.FC = () => {
       alert("Credenciais Nexus não localizadas.");
     }
     setIsAuthLoading(false);
+  };
+
+  // --- FUNÇÕES MASTER ADMIN (CRUD REAL) ---
+  const handleAddOrg = (newOrgData: Partial<Organization>) => {
+    const newOrg: Organization = {
+      id: `WS-${Math.random().toString(36).substr(2, 4).toUpperCase()}-${Math.floor(Math.random() * 1000)}`,
+      name: newOrgData.name || 'Nova Empresa',
+      cnpj: newOrgData.cnpj || '00.000.000/0001-00',
+      subscription: newOrgData.subscription || 'BRONZE',
+      status: 'ACTIVE',
+      maxUsers: newOrgData.subscription === 'GOLD' ? 100 : 10,
+      createdAt: new Date().toISOString(),
+      metrics: { usersCount: 1, leadsCount: 0, revenueValue: 0 },
+      branding: { primaryColor: '#C5A059', secondaryColor: '#020617', logoUrl: null },
+      lgpdCompliance: { dataRetentionDays: 180, anonymizeOnDelete: true, dpoContact: '' },
+      pipelineStages: INITIAL_ORGS[0].pipelineStages,
+      customFieldDefinitions: []
+    };
+    setOrganizations(prev => [...prev, newOrg]);
+  };
+
+  const handleUpdateStatus = (id: string, status: 'ACTIVE' | 'SUSPENDED') => {
+    setOrganizations(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+  };
+
+  const handleUpdateSub = (id: string, level: SubscriptionLevel) => {
+    setOrganizations(prev => prev.map(o => o.id === id ? { ...o, subscription: level } : o));
   };
 
   const handleLogout = () => {
@@ -207,4 +225,62 @@ const App: React.FC = () => {
              <div className="flex items-center space-x-4 bg-slate-900/80 pl-5 pr-2 py-2 rounded-2xl border border-slate-800 shadow-xl relative group hover:border-amber-500/50 transition-all cursor-pointer">
                 <div className="text-right">
                    <p className="text-xs font-black text-white leading-none">{currentUser!.name}</p>
-                   <p className={`text-[8px] font-bold uppercase tracking-[0.2em] mt-1.5 ${currentUser?.role === 'SUPER_ADMIN' ? 'text-amber-500' : 'text-blue-500'
+                   <p className={`text-[8px] font-bold uppercase tracking-[0.2em] mt-1.5 ${currentUser?.role === 'SUPER_ADMIN' ? 'text-amber-500' : 'text-blue-500'}`}>
+                     {currentUser?.role}
+                   </p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 group-hover:text-amber-500 transition-colors">
+                   <i className={`fa-solid ${currentUser?.role === 'SUPER_ADMIN' ? 'fa-crown' : 'fa-user-gear'}`}></i>
+                </div>
+                <div className="absolute top-full right-0 mt-3 w-56 bg-slate-900 border border-slate-800 rounded-[1.5rem] shadow-2xl opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all p-2 z-[200] pointer-events-none group-hover:pointer-events-auto">
+                   <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-rose-500/10 text-rose-500 rounded-xl transition-colors">
+                      <i className="fa-solid fa-power-off text-sm"></i>
+                      <span className="text-[10px] font-black uppercase tracking-widest">Encerrar Sessão</span>
+                   </button>
+                </div>
+             </div>
+          </div>
+        </header>
+
+        <section className="max-w-7xl mx-auto pb-24">
+          {activeModule === ModuleType.DASHBOARD && <Dashboard />}
+          {activeModule === ModuleType.MARKETING && <MarketingAI />}
+          {activeModule === ModuleType.SALES && <SalesCRM leads={leads} setLeads={setLeads} />}
+          {activeModule === ModuleType.RH && <RHManager />}
+          {activeModule === ModuleType.FINANCE && <FinancialManager transactions={finance} onAddTransaction={() => {}} onUpdateStatus={() => {}} />}
+          {activeModule === ModuleType.SCHEDULING && <SchedulingManager />}
+          {activeModule === ModuleType.DOCUMENTS && <NexusDocs />}
+          {activeModule === ModuleType.INVENTORY && <InventoryManager items={items} setItems={setItems} />}
+          {activeModule === ModuleType.PRICING && <PricingPage />}
+          
+          {activeModule === ModuleType.SETTINGS && (
+            <SettingsManager 
+              org={org} 
+              onUpdateOrg={setOrg} 
+              users={users} 
+              onAddUser={(u) => setUsers([...users, { ...u, id: Date.now().toString(), organizationId: org.id, isActive: true, mfaEnabled: false } as UserProfile])}
+              onRemoveUser={(id) => setUsers(users.filter(u => u.id !== id))}
+              auditLogs={[]} 
+              userLimit={org.maxUsers} 
+            />
+          )}
+
+          {activeModule === ModuleType.MASTER_ADMIN && currentUser?.role === 'SUPER_ADMIN' && (
+            <MasterAdmin 
+              organizations={organizations} 
+              onUpdateOrgStatus={handleUpdateStatus} 
+              onUpdateOrgSubscription={handleUpdateSub} 
+              onAddOrg={handleAddOrg} 
+            />
+          )}
+        </section>
+      </main>
+
+      <NexusChat />
+      <NexusVoice />
+      {showUpgradeModal && <UpgradeModal required={showUpgradeModal.required} reason={showUpgradeModal.reason} onClose={() => setShowUpgradeModal(null)} />}
+    </div>
+  );
+};
+
+export default App;
