@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WS Brasil - Ecossistema Business</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        .active-link { border-left: 4px solid #3b82f6; background: rgba(59, 130, 246, 0.1); color: white; }
+    </style>
+</head>
+<body class="bg-[#05070a] text-white min-h-screen font-sans">
+
+    <div id="login-screen" class="flex items-center justify-center min-h-screen">
+        <div class="bg-[#0d1117] p-10 rounded-2xl border border-blue-900/30 w-full max-w-md shadow-2xl">
+            <h1 class="text-2xl font-black text-center mb-8 italic">WS BRASIL</h1>
+            <div class="space-y-4">
+                <input type="email" id="email" placeholder="E-mail" class="w-full bg-[#161b22] border border-slate-800 rounded-lg p-4 outline-none focus:border-blue-500 text-sm">
+                <input type="password" id="password" placeholder="Senha" class="w-full bg-[#161b22] border border-slate-800 rounded-lg p-4 outline-none focus:border-blue-500 text-sm">
+                <button onclick="entrar()" id="btn-login" class="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-lg font-bold uppercase tracking-widest text-xs transition-all">Entrar no Sistema</button>
+                <p id="error-msg" class="text-center text-red-500 text-[10px] font-bold uppercase"></p>
+            </div>
+        </div>
+    </div>
+
+    <div id="app-shell" class="hidden flex h-screen overflow-hidden">
+        
+        <aside class="w-64 bg-[#0d1117] border-r border-slate-800 flex flex-col">
+            <div class="p-6 border-b border-slate-800">
+                <h2 class="font-black text-blue-500">WS BRASIL</h2>
+                <p class="text-[10px] text-slate-500">Inteligência Comercial</p>
+            </div>
+            <nav class="flex-1 mt-4">
+                <a href="#" onclick="showModule('crm')" class="flex items-center p-4 text-slate-400 hover:text-white transition active-link" id="link-crm">📊 Módulo CRM</a>
+                <a href="#" onclick="showModule('financeiro')" class="flex items-center p-4 text-slate-400 hover:text-white transition" id="link-financeiro">💰 Financeiro / PDV</a>
+                <a href="#" onclick="showModule('rh')" class="flex items-center p-4 text-slate-400 hover:text-white transition" id="link-rh">👥 RH & Departamento</a>
+            </nav>
+            <div class="p-4 border-t border-slate-800">
+                <button onclick="location.reload()" class="text-xs text-red-500 font-bold uppercase">Sair do Sistema</button>
+            </div>
+        </aside>
+
+        <main class="flex-1 overflow-y-auto p-8 bg-[#05070a]">
+            
+            <div id="mod-crm" class="module-content">
+                <h2 class="text-2xl font-bold mb-6">Pipeline de Vendas (CRM)</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-[#0d1117] p-4 rounded-lg border border-slate-800 min-h-[400px]">
+                        <h3 class="text-xs font-bold text-blue-400 mb-4 border-b border-blue-900/30 pb-2">PROSPECÇÃO</h3>
+                        <div class="bg-slate-800 p-3 rounded mb-2 text-xs border-l-4 border-blue-500">Oficina Mecânica Master - R$ 2.500</div>
+                    </div>
+                    <div class="bg-[#0d1117] p-4 rounded-lg border border-slate-800 min-h-[400px]">
+                        <h3 class="text-xs font-bold text-yellow-400 mb-4 border-b border-yellow-900/30 pb-2">NEGOCIAÇÃO</h3>
+                    </div>
+                    <div class="bg-[#0d1117] p-4 rounded-lg border border-slate-800 min-h-[400px]">
+                        <h3 class="text-xs font-bold text-green-400 mb-4 border-b border-green-900/30 pb-2">FECHADO</h3>
+                    </div>
+                </div>
+            </div>
+
+            <div id="mod-financeiro" class="module-content hidden">
+                <h2 class="text-2xl font-bold mb-6">Gestão Financeira & PDV</h2>
+                <div class="bg-[#0d1117] p-6 rounded-xl border border-slate-800">
+                    <p class="text-slate-400 mb-4 text-sm">Fluxo de Caixa em Tempo Real</p>
+                    <div class="h-48 flex items-end gap-2 px-2 border-b border-slate-800 pb-2">
+                        <div class="bg-blue-600 w-full" style="height: 40%"></div>
+                        <div class="bg-blue-600 w-full" style="height: 65%"></div>
+                        <div class="bg-blue-600 w-full" style="height: 90%"></div>
+                        <div class="bg-blue-600 w-full" style="height: 55%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="mod-rh" class="module-content hidden">
+                <h2 class="text-2xl font-bold mb-6">Recursos Humanos & Gestão</h2>
+                <div class="bg-[#0d1117] p-6 rounded-xl border border-slate-800">
+                    <button class="bg-blue-600 px-4 py-2 rounded text-xs font-bold mb-4">+ Cadastrar Colaborador</button>
+                    <div class="space-y-2">
+                        <div class="flex justify-between p-3 bg-slate-900 rounded text-sm">
+                            <span>Wallace Oliveira</span>
+                            <span class="text-blue-500">Diretor</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        // CREDENCIAIS WS BRASIL
+        const SUPABASE_URL = 'https://lpjrdovnjpkmbqjimohd.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwanJkb3ZuanBrbWJxamltb2hkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczMzQ5MzYsImV4cCI6MjA4MjkxMDkzNn0.FyIuEqw8uXFy8j81aisPtqyy7VH1ItRmj8BdyzDid2Q';
+        const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        async function entrar() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const msg = document.getElementById('error-msg');
+            const btn = document.getElementById('btn-login');
+
+            msg.innerText = "AUTENTICANDO...";
+            btn.disabled = true;
+
+            const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
+
+            if (error) {
+                msg.innerText = "ACESSO NEGADO: " + error.message.toUpperCase();
+                btn.innerText = "Entrar no Sistema";
+                btn.disabled = false;
+            } else {
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('app-shell').classList.remove('hidden');
+            }
+        }
+
+        // FUNÇÃO PARA NAVEGAR ENTRE MÓDULOS
+        function showModule(modName) {
+            // Esconde todos
+            document.querySelectorAll('.module-content').forEach(m => m.classList.add('hidden'));
+            // Remove destaque dos links
+            document.querySelectorAll('nav a').forEach(l => l.classList.remove('active-link'));
+            
+            // Mostra o selecionado
+            document.getElementById('mod-' + modName).classList.remove('hidden');
+            document.getElementById('link-' + modName).classList.add('active-link');
+        }
+    </script>
+</body>
+</html>
