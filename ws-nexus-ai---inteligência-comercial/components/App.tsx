@@ -1,51 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { ModuleType, ProductItem, Organization, UserProfile, SubscriptionLevel, FinancialTransaction, TransactionStatus, Lead } from './types';
-import Sidebar from './components/Sidebar';
-import Dashboard from './components/Dashboard';
-import MarketingAI from './components/MarketingAI';
-import SalesCRM from './components/SalesCRM';
-import NexusDocs from './components/NexusDocs';
-import InventoryManager from './components/InventoryManager';
-import RHManager from './components/RHManager';
-import SchedulingManager from './components/SchedulingManager';
-import SettingsManager from './components/SettingsManager';
-import FinancialManager from './components/FinancialManager';
-import MasterAdmin from './components/MasterAdmin';
-import PricingPage from './components/PricingPage';
-import AuthManager from './components/AuthManager';
-import PasswordReset from './components/PasswordReset';
-import NexusChat from './components/NexusChat';
-import UpgradeModal from './components/UpgradeModal';
-import NexusVoice from './components/NexusVoice';
+import { ModuleType, Organization, UserProfile, FinancialTransaction, Lead } from './types';
 
-// Importação do Ecossistema WS Brasil Nexus (Supabase)
+// Importação dos Componentes que já configuramos
+import Dashboard from './components/Dashboard';
+import SalesCRM from './components/SalesCRM';
+import FinancialManager from './components/FinancialManager';
+
+// Importação do Serviço Supabase
 import { supabase, syncEntity } from './services/supabase';
 
-const INITIAL_ORGS: Organization[] = [
-  {
-    id: 'ORG-WS-001',
-    name: 'WS Brasil Inteligência Comercial',
-    cnpj: '12.345.678/0001-90',
-    subscription: 'GOLD', 
-    maxUsers: 100,
-    status: 'ACTIVE',
-    createdAt: '2024-01-01',
-    lgpdCompliance: { dataRetentionDays: 180, anonymizeOnDelete: true, dpoContact: 'dpo@wsbrasil.com' },
-    metrics: { usersCount: 2, leadsCount: 450, revenueValue: 125000 },
-    branding: { primaryColor: '#C5A059', secondaryColor: '#020617', logoUrl: null },
-    customFieldDefinitions: [],
-    pipelineStages: [
-      { id: 'QUALIFICADO', title: 'OPORTUNIDADES AGENDADAS', color: 'border-cyan-500' },
-      { id: 'REUNIAO', title: 'REUNIÃO ESTRATÉGICA', color: 'border-blue-500' },
-      { id: 'PROPOSTA', title: 'PROPOSTA EM ANÁLISE', color: 'border-amber-500' },
-      { id: 'FECHAMENTO', title: 'FECHAMENTO IMINENTE', color: 'border-emerald-500' },
-    ]
-  }
-];
+const INITIAL_ORG: Organization = {
+  id: 'ORG-WS-001',
+  name: 'WS Brasil Inteligência Comercial',
+  cnpj: '12.345.678/0001-90',
+  subscription: 'GOLD', 
+  maxUsers: 100,
+  status: 'ACTIVE',
+  createdAt: '2024-01-01',
+  branding: { primaryColor: '#C5A059', secondaryColor: '#020617', logoUrl: null },
+  metrics: { usersCount: 2, leadsCount: 450, revenueValue: 125000 },
+  lgpdCompliance: { dataRetentionDays: 180, anonymizeOnDelete: true, dpoContact: 'dpo@wsbrasil.com' },
+  pipelineStages: []
+};
 
 const MASTER_OWNER: UserProfile = { 
   id: 'owner-ws-root', 
-  name: 'Proprietário WS Brasil', 
+  name: 'Diretoria WS Brasil', 
   email: 'diretoria@wsbrasil.com.br', 
   role: 'SUPER_ADMIN', 
   organizationId: 'ORG-WS-001', 
@@ -55,111 +35,72 @@ const MASTER_OWNER: UserProfile = {
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAuthLoading, setIsAuthLoading] = useState(false);
-  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'CONNECTED' | 'ERROR' | 'SYNCING'>('CONNECTED');
-  const [mustResetPassword, setMustResetPassword] = useState(false);
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [activeModule, setActiveModule] = useState<ModuleType>(ModuleType.DASHBOARD);
-  const [showUpgradeModal, setShowUpgradeModal] = useState<{ required: SubscriptionLevel, reason: string } | null>(null);
-
-  const [organizations, setOrganizations] = useState<Organization[]>(INITIAL_ORGS);
-  const [org, setOrg] = useState<Organization>(INITIAL_ORGS[0]);
-  const [users, setUsers] = useState<UserProfile[]>([MASTER_OWNER]);
-  const [items, setItems] = useState<ProductItem[]>([]);
   const [finance, setFinance] = useState<FinancialTransaction[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
 
-  // Carregamento Inicial
+  // 1. Busca Dados ao Iniciar
   useEffect(() => {
-    const bootstrapNexus = async () => {
-      setConnectionStatus('SYNCING');
-      const { data, error } = await supabase.from('organizations').select('*');
-      if (!error && data && data.length > 0) {
-        setOrganizations(data.map(o => ({...o, branding: typeof o.branding === 'string' ? JSON.parse(o.branding) : o.branding, pipelineStages: INITIAL_ORGS[0].pipelineStages})));
-        setConnectionStatus('CONNECTED');
-      }
-    };
-    bootstrapNexus();
-  }, []);
-
-  // Busca dados da Org (Financeiro, Leads, Usuários)
-  useEffect(() => {
-    const fetchOrgData = async () => {
+    const fetchData = async () => {
       if (!isAuthenticated) return;
-      setIsCloudSyncing(true);
-      const { data: fin } = await supabase.from('financial_transactions').select('*').eq('organization_id', org.id);
-      if (fin) setFinance(fin as FinancialTransaction[]);
-      const { data: ld } = await supabase.from('leads').select('*').eq('organizationId', org.id);
-      if (ld) setLeads(ld as Lead[]);
-      const { data: usrs } = await supabase.from('users').select('*').eq('organizationId', org.id);
-      if (usrs) setUsers(usrs.map(u => ({ ...u, name: u.fullName || u.name })));
-      setIsCloudSyncing(false);
+      
+      const { data: finData } = await supabase.from('financial_transactions').select('*');
+      if (finData) setFinance(finData);
+
+      const { data: leadData } = await supabase.from('leads').select('*');
+      if (leadData) setLeads(leadData);
     };
-    fetchOrgData();
-  }, [org.id, isAuthenticated]);
+    fetchData();
+  }, [isAuthenticated]);
 
-  const handleLogin = async (email: string, pass: string) => {
-    setIsAuthLoading(true);
-    if (email.toLowerCase() === 'diretoria@wsbrasil.com.br' && pass === 'wsbrasil123') {
-      setCurrentUser(MASTER_OWNER);
-      setOrg(organizations[0]);
-      setIsAuthenticated(true);
-    } else {
-      const { data: dbUser } = await supabase.from('users').select('*').eq('email', email.toLowerCase()).single();
-      if (dbUser && pass === 'admin2026') {
-        setCurrentUser({ ...dbUser, name: dbUser.fullName || dbUser.name });
-        setOrg(organizations.find(o => o.id === dbUser.organizationId) || INITIAL_ORGS[0]);
-        setIsAuthenticated(true);
-      } else { alert("Acesso Negado."); }
-    }
-    setIsAuthLoading(false);
-  };
-
+  // 2. Funções de Gravação
   const handleAddTransaction = async (data: Partial<FinancialTransaction>) => {
-    const newTx = { ...data, id: `TX-${Date.now()}`, organization_id: org.id };
+    const newTx = { ...data, id: `TX-${Date.now()}`, organization_id: INITIAL_ORG.id };
     const result = await syncEntity('financial_transactions', [newTx]);
     if (result.success) setFinance(prev => [...prev, newTx as FinancialTransaction]);
   };
 
   const handleAddLead = async (leadData: Partial<Lead>) => {
-    const newLead = { ...leadData, id: `LEAD-${Date.now()}`, organizationId: org.id, status: 'QUALIFICADO' };
+    const newLead = { ...leadData, id: `LEAD-${Date.now()}`, organizationId: INITIAL_ORG.id, status: 'QUALIFICADO' };
     const result = await syncEntity('leads', [newLead]);
     if (result.success) setLeads(prev => [...prev, newLead as Lead]);
   };
 
-  if (!isAuthenticated) return <AuthManager onLogin={handleLogin} isLoading={isAuthLoading} />;
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsAuthenticated(true);
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <form onSubmit={handleLogin} className="bg-slate-900 p-10 rounded-[3rem] border border-slate-800 w-full max-w-md text-center">
+          <h2 className="text-white font-black text-2xl uppercase mb-6">Nexus Login</h2>
+          <button type="submit" className="w-full bg-amber-600 py-4 rounded-2xl text-slate-950 font-black uppercase">Entrar no Sistema</button>
+        </form>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex min-h-screen bg-slate-950">
-      <Sidebar activeModule={activeModule} setActiveModule={setActiveModule} userRole={currentUser!.role} planType={org.subscription} isCloudSyncing={isCloudSyncing} connectionStatus={connectionStatus} />
-      <main className="flex-1 ml-20 p-8 lg:p-12 overflow-y-auto bg-slate-950 text-white">
-        <header className="flex justify-between items-center mb-12">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-amber-600 flex items-center justify-center font-black text-slate-950">{org.name[0]}</div>
-            <div>
-              <h1 className="font-black uppercase tracking-tighter">{org.name}</h1>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Nexus Intelligence System</p>
-            </div>
-          </div>
-          <button onClick={() => setIsAuthenticated(false)} className="text-rose-500 text-[10px] font-black uppercase tracking-widest border border-rose-500/20 px-4 py-2 rounded-xl hover:bg-rose-500/10 transition-all">Sair</button>
-        </header>
+    <div className="min-h-screen bg-slate-950 text-white p-8">
+      <nav className="flex gap-4 mb-10 overflow-x-auto pb-4">
+        <button onClick={() => setActiveModule(ModuleType.DASHBOARD)} className={`px-6 py-2 rounded-xl font-black text-[10px] uppercase ${activeModule === ModuleType.DASHBOARD ? 'bg-amber-600 text-slate-950' : 'bg-slate-900 text-slate-400'}`}>Dashboard</button>
+        <button onClick={() => setActiveModule(ModuleType.SALES)} className={`px-6 py-2 rounded-xl font-black text-[10px] uppercase ${activeModule === ModuleType.SALES ? 'bg-amber-600 text-slate-950' : 'bg-slate-900 text-slate-400'}`}>CRM Leads</button>
+        <button onClick={() => setActiveModule(ModuleType.FINANCE)} className={`px-6 py-2 rounded-xl font-black text-[10px] uppercase ${activeModule === ModuleType.FINANCE ? 'bg-amber-600 text-slate-950' : 'bg-slate-900 text-slate-400'}`}>Financeiro</button>
+      </nav>
 
-        <section className="max-w-7xl mx-auto">
-          {activeModule === ModuleType.DASHBOARD && <Dashboard transactions={finance} leads={leads} />}
-          {activeModule === ModuleType.SALES && <SalesCRM leads={leads} onAddLead={handleAddLead} />}
-          {activeModule === ModuleType.FINANCE && <FinancialManager transactions={finance} onAddTransaction={handleAddTransaction} onUpdateStatus={() => {}} />}
-          {activeModule === ModuleType.MARKETING && <MarketingAI />}
-          {activeModule === ModuleType.RH && <RHManager />}
-          {activeModule === ModuleType.INVENTORY && <InventoryManager items={items} setItems={setItems} />}
-          {activeModule === ModuleType.SCHEDULING && <SchedulingManager />}
-          {activeModule === ModuleType.DOCUMENTS && <NexusDocs />}
-          {activeModule === ModuleType.PRICING && <PricingPage />}
-          {activeModule === ModuleType.SETTINGS && <SettingsManager org={org} onUpdateOrg={setOrg} users={users} onAddUser={() => {}} onRemoveUser={() => {}} auditLogs={[]} userLimit={org.maxUsers} />}
-        </section>
+      <main className="max-w-7xl mx-auto">
+        {activeModule === ModuleType.DASHBOARD && <Dashboard transactions={finance} leads={leads} />}
+        {activeModule === ModuleType.SALES && <SalesCRM leads={leads} onAddLead={handleAddLead} />}
+        {activeModule === ModuleType.FINANCE && (
+          <FinancialManager 
+            transactions={finance} 
+            onAddTransaction={handleAddTransaction} 
+            onUpdateStatus={() => {}} 
+          />
+        )}
       </main>
-      <NexusChat />
-      <NexusVoice />
     </div>
   );
 };
